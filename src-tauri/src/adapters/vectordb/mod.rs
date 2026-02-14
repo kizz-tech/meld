@@ -1,0 +1,1936 @@
+use rusqlite::{params, Connection};
+use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+use crate::adapters::llm::TokenUsage;
+use crate::core::agent::state::AgentState;
+use crate::core::ports::store::{RunFinishRecord, RunStartRecord, StorePort};
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ChunkResult {
+    pub chunk_id: i64,
+    pub file_path: String,
+    pub chunk_index: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heading_path: Option<String>,
+    pub content: String,
+    pub distance: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retrieval_score: Option<f64>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ConversationSummary {
+    pub id: String,
+    pub title: String,
+    pub updated_at: String,
+    pub created_at: String,
+    pub message_count: i64,
+    pub archived: bool,
+    pub pinned: bool,
+    pub sort_order: Option<i64>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ConversationMessage {
+    pub id: String,
+    pub role: String,
+    pub content: String,
+    pub sources: Option<serde_json::Value>,
+    pub tool_calls: Option<serde_json::Value>,
+    pub timeline: Option<serde_json::Value>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RunSummary {
+    pub run_id: String,
+    pub conversation_id: String,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub status: String,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub policy_version: Option<String>,
+    pub policy_fingerprint: Option<String>,
+    pub tool_calls: i64,
+    pub write_calls: i64,
+    pub verify_failures: i64,
+    pub duration_ms: Option<i64>,
+    pub token_usage: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RunEvent {
+    pub id: i64,
+    pub run_id: String,
+    pub iteration: i64,
+    pub channel: String,
+    pub event_type: String,
+    pub payload: serde_json::Value,
+    pub ts: String,
+}
+
+pub struct VectorDb {
+    conn: Connection,
+}
+
+pub struct SqliteRunStore {
+    db_path: PathBuf,
+}
+
+impl SqliteRunStore {
+    pub fn new(db_path: PathBuf) -> Self {
+        Self { db_path }
+    }
+}
+
+fn token_usage_from_finish_record(record: &RunFinishRecord<'_>) -> Option<TokenUsage> {
+    let usage = TokenUsage {
+        input_tokens: record.input_tokens,
+        output_tokens: record.output_tokens,
+        total_tokens: record.total_tokens,
+        reasoning_tokens: record.reasoning_tokens,
+        cache_read_tokens: record.cache_read_tokens,
+        cache_write_tokens: record.cache_write_tokens,
+    };
+
+    (!usage.is_empty()).then_some(usage)
+}
+
+impl StorePort for SqliteRunStore {
+    fn start_run(&self, record: RunStartRecord<'_>) {
+        let started_at = chrono::Utc::now().to_rfc3339();
+        if let Ok(mut db) = VectorDb::open(&self.db_path) {
+            let _ = db.create_run(
+                record.run_id,
+                &record.conversation_id.to_string(),
+                &started_at,
+                AgentState::Accepted.as_str(),
+                Some(record.provider),
+                Some(record.model),
+                Some(record.policy_version),
+                Some(record.policy_fingerprint),
+            );
+        }
+    }
+
+    fn log_event(
+        &self,
+        run_id: &str,
+        iteration: usize,
+        channel: &str,
+        event_type: &str,
+        payload: &JsonValue,
+    ) {
+        let ts = chrono::Utc::now().to_rfc3339();
+        if let Ok(mut db) = VectorDb::open(&self.db_path) {
+            let _ =
+                db.append_run_event(run_id, iteration as i64, channel, event_type, payload, &ts);
+        }
+    }
+
+    fn finish_run(&self, record: RunFinishRecord<'_>) {
+        let finished_at = chrono::Utc::now().to_rfc3339();
+        let token_usage_json = token_usage_from_finish_record(&record)
+            .and_then(|usage| serde_json::to_string(&usage).ok());
+        if let Ok(mut db) = VectorDb::open(&self.db_path) {
+            let _ = db.finish_run(
+                record.run_id,
+                &finished_at,
+                record.status.as_str(),
+                record.tool_calls as i64,
+                record.write_calls as i64,
+                record.verify_failures as i64,
+                record.duration_ms as i64,
+                token_usage_json.as_deref(),
+            );
+        }
+    }
+}
+
+impl VectorDb {
+    pub fn open(path: &Path) -> Result<Self, Box<dyn std::error::Error>> {
+        let conn = Connection::open(path)?;
+
+        // Load sqlite-vec extension
+        // For now, we use standard tables — sqlite-vec will be loaded when available
+        conn.execute_batch(
+            "
+            PRAGMA foreign_keys = ON;
+
+            CREATE TABLE IF NOT EXISTS chunks (
+                id INTEGER PRIMARY KEY,
+                file_path TEXT NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                heading_path TEXT,
+                content TEXT NOT NULL,
+                char_start INTEGER NOT NULL,
+                char_end INTEGER NOT NULL,
+                file_hash TEXT NOT NULL,
+                embedding BLOB,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(file_path, chunk_index)
+            );
+
+            CREATE TABLE IF NOT EXISTS files (
+                path TEXT PRIMARY KEY,
+                hash TEXT NOT NULL,
+                chunk_count INTEGER NOT NULL,
+                indexed_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS conversations (
+                id INTEGER PRIMARY KEY,
+                title TEXT NOT NULL DEFAULT '',
+                archived INTEGER NOT NULL DEFAULT 0,
+                pinned INTEGER NOT NULL DEFAULT 0,
+                sort_order INTEGER,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY,
+                conversation_id INTEGER NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                sources TEXT,
+                tool_calls TEXT,
+                timeline TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (conversation_id) REFERENCES conversations(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS runs (
+                run_id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                finished_at TEXT,
+                status TEXT NOT NULL,
+                provider TEXT,
+                model TEXT,
+                policy_version TEXT,
+                policy_fingerprint TEXT,
+                tool_calls INTEGER DEFAULT 0,
+                write_calls INTEGER DEFAULT 0,
+                verify_failures INTEGER DEFAULT 0,
+                duration_ms INTEGER,
+                token_usage TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS run_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id TEXT NOT NULL,
+                iteration INTEGER NOT NULL,
+                channel TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                ts TEXT NOT NULL,
+                FOREIGN KEY (run_id) REFERENCES runs(run_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_chunks_file ON chunks(file_path);
+            CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id);
+            CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
+            CREATE INDEX IF NOT EXISTS idx_run_events_run ON run_events(run_id);
+            CREATE INDEX IF NOT EXISTS idx_run_events_ts ON run_events(ts);
+            ",
+        )?;
+
+        // FTS is optional. When sqlite is built without FTS5, fallback to vector-only retrieval.
+        let _ = conn.execute_batch(
+            "
+            CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+                content,
+                file_path UNINDEXED,
+                chunk_index UNINDEXED,
+                heading_path UNINDEXED
+            );
+            ",
+        );
+
+        // Migration-safe ALTERs for older DBs.
+        ignore_duplicate_column_error(
+            conn.execute("ALTER TABLE conversations ADD COLUMN title TEXT", []),
+        )?;
+        ignore_duplicate_column_error(
+            conn.execute("ALTER TABLE conversations ADD COLUMN updated_at TEXT", []),
+        )?;
+        ignore_duplicate_column_error(conn.execute(
+            "ALTER TABLE conversations ADD COLUMN archived INTEGER NOT NULL DEFAULT 0",
+            [],
+        ))?;
+        ignore_duplicate_column_error(conn.execute(
+            "ALTER TABLE conversations ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
+            [],
+        ))?;
+        ignore_duplicate_column_error(conn.execute(
+            "ALTER TABLE conversations ADD COLUMN sort_order INTEGER",
+            [],
+        ))?;
+        ignore_duplicate_column_error(
+            conn.execute("ALTER TABLE messages ADD COLUMN sources TEXT", []),
+        )?;
+        ignore_duplicate_column_error(
+            conn.execute("ALTER TABLE messages ADD COLUMN tool_calls TEXT", []),
+        )?;
+        ignore_duplicate_column_error(
+            conn.execute("ALTER TABLE messages ADD COLUMN timeline TEXT", []),
+        )?;
+        ignore_duplicate_column_error(
+            conn.execute("ALTER TABLE chunks ADD COLUMN heading_path TEXT", []),
+        )?;
+        ignore_duplicate_column_error(
+            conn.execute("ALTER TABLE runs ADD COLUMN policy_fingerprint TEXT", []),
+        )?;
+
+        sync_chunks_fts(&conn)?;
+
+        let has_title = table_has_column(&conn, "conversations", "title")?;
+        let has_updated_at = table_has_column(&conn, "conversations", "updated_at")?;
+        let has_archived = table_has_column(&conn, "conversations", "archived")?;
+        let has_pinned = table_has_column(&conn, "conversations", "pinned")?;
+        let has_sort_order = table_has_column(&conn, "conversations", "sort_order")?;
+
+        if has_title && has_updated_at {
+            conn.execute(
+                "UPDATE conversations
+                 SET title = COALESCE(NULLIF(title, ''), 'New conversation'),
+                     updated_at = COALESCE(updated_at, created_at, datetime('now'))
+                 WHERE title IS NULL OR title = '' OR updated_at IS NULL",
+                [],
+            )?;
+        } else if has_title {
+            conn.execute(
+                "UPDATE conversations
+                 SET title = COALESCE(NULLIF(title, ''), 'New conversation')
+                 WHERE title IS NULL OR title = ''",
+                [],
+            )?;
+        }
+        if has_archived {
+            conn.execute(
+                "UPDATE conversations
+                 SET archived = 0
+                 WHERE archived IS NULL OR archived NOT IN (0, 1)",
+                [],
+            )?;
+        }
+        if has_pinned {
+            conn.execute(
+                "UPDATE conversations
+                 SET pinned = 0
+                 WHERE pinned IS NULL OR pinned NOT IN (0, 1)",
+                [],
+            )?;
+        }
+        if has_sort_order {
+            conn.execute(
+                "WITH ordered AS (
+                    SELECT
+                        id,
+                        ROW_NUMBER() OVER (
+                            ORDER BY datetime(COALESCE(updated_at, created_at, datetime('now'))) DESC, id DESC
+                        ) AS rn
+                    FROM conversations
+                    WHERE sort_order IS NULL
+                 )
+                 UPDATE conversations
+                 SET sort_order = (
+                    SELECT rn FROM ordered WHERE ordered.id = conversations.id
+                 )
+                 WHERE sort_order IS NULL",
+                [],
+            )?;
+        }
+
+        // Create indexes that depend on migrated columns only when the column is present.
+        if has_updated_at {
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(updated_at)",
+                [],
+            )?;
+        }
+        if has_archived {
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_conversations_archived ON conversations(archived)",
+                [],
+            )?;
+        }
+        if has_pinned {
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_conversations_pinned ON conversations(pinned)",
+                [],
+            )?;
+        }
+        if has_sort_order {
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_conversations_sort_order ON conversations(sort_order)",
+                [],
+            )?;
+        }
+        let has_heading_path = table_has_column(&conn, "chunks", "heading_path")?;
+        if has_heading_path {
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_chunks_heading ON chunks(heading_path)",
+                [],
+            )?;
+        }
+
+        Ok(Self { conn })
+    }
+
+    pub fn file_is_current(&self, file_path: &str, hash: &str) -> bool {
+        self.conn
+            .query_row(
+                "SELECT hash FROM files WHERE path = ?1",
+                params![file_path],
+                |row| row.get::<_, String>(0),
+            )
+            .map(|h| h == hash)
+            .unwrap_or(false)
+    }
+
+    pub fn remove_file_chunks(
+        &mut self,
+        file_path: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if table_exists(&self.conn, "chunks_fts")? {
+            self.conn.execute(
+                "DELETE FROM chunks_fts WHERE rowid IN (SELECT id FROM chunks WHERE file_path = ?1)",
+                params![file_path],
+            )?;
+        }
+        self.conn.execute(
+            "DELETE FROM chunks WHERE file_path = ?1",
+            params![file_path],
+        )?;
+        self.conn
+            .execute("DELETE FROM files WHERE path = ?1", params![file_path])?;
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn insert_chunk(
+        &mut self,
+        file_path: &str,
+        chunk_index: usize,
+        heading_path: Option<&str>,
+        content: &str,
+        char_start: usize,
+        char_end: usize,
+        file_hash: &str,
+        embedding: &[f32],
+    ) -> Result<i64, Box<dyn std::error::Error>> {
+        let embedding_bytes: Vec<u8> = embedding.iter().flat_map(|f| f.to_le_bytes()).collect();
+
+        self.conn.execute(
+            "INSERT INTO chunks (file_path, chunk_index, heading_path, content, char_start, char_end, file_hash, embedding)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                file_path,
+                chunk_index as i64,
+                heading_path,
+                content,
+                char_start as i64,
+                char_end as i64,
+                file_hash,
+                embedding_bytes,
+            ],
+        )?;
+
+        let chunk_id = self.conn.last_insert_rowid();
+        if table_exists(&self.conn, "chunks_fts")? {
+            self.conn.execute(
+                "INSERT INTO chunks_fts(rowid, content, file_path, chunk_index, heading_path)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    chunk_id,
+                    content,
+                    file_path,
+                    chunk_index as i64,
+                    heading_path.unwrap_or(""),
+                ],
+            )?;
+        }
+
+        Ok(chunk_id)
+    }
+
+    pub fn upsert_file(
+        &mut self,
+        file_path: &str,
+        hash: &str,
+        chunk_count: usize,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO files (path, hash, chunk_count, indexed_at)
+             VALUES (?1, ?2, ?3, datetime('now'))",
+            params![file_path, hash, chunk_count as i64],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_indexed_files(&self) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT path FROM files ORDER BY path ASC")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        let mut files = Vec::new();
+        for row in rows {
+            files.push(row?);
+        }
+        Ok(files)
+    }
+
+    pub fn index_stats(&self) -> Result<(i64, i64), Box<dyn std::error::Error>> {
+        let file_count = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM files", [], |row| row.get::<_, i64>(0))?;
+        let chunk_count = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM chunks", [], |row| {
+                row.get::<_, i64>(0)
+            })?;
+        Ok((file_count, chunk_count))
+    }
+
+    fn search_vector_candidates(
+        &self,
+        query_embedding: &[f32],
+        limit: usize,
+    ) -> Result<Vec<ChunkResult>, Box<dyn std::error::Error>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, file_path, chunk_index, heading_path, content, embedding
+             FROM chunks
+             WHERE embedding IS NOT NULL",
+        )?;
+
+        let mut results: Vec<(ChunkResult, f64)> = Vec::new();
+
+        let rows = stmt.query_map([], |row| {
+            let chunk_id: i64 = row.get(0)?;
+            let file_path: String = row.get(1)?;
+            let chunk_index: i64 = row.get(2)?;
+            let heading_path: Option<String> = row.get(3)?;
+            let content: String = row.get(4)?;
+            let embedding_bytes: Vec<u8> = row.get(5)?;
+            Ok((
+                chunk_id,
+                file_path,
+                chunk_index as usize,
+                heading_path,
+                content,
+                embedding_bytes,
+            ))
+        })?;
+
+        for row in rows {
+            let (chunk_id, file_path, chunk_index, heading_path, content, embedding_bytes) = row?;
+
+            let stored_embedding: Vec<f32> = embedding_bytes
+                .chunks_exact(4)
+                .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+                .collect();
+
+            let similarity = cosine_similarity(query_embedding, &stored_embedding);
+
+            results.push((
+                ChunkResult {
+                    chunk_id,
+                    file_path,
+                    chunk_index,
+                    heading_path: normalize_heading_path(heading_path),
+                    content,
+                    distance: 1.0 - similarity,
+                    retrieval_score: None,
+                },
+                similarity,
+            ));
+        }
+
+        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        results.truncate(limit);
+
+        Ok(results.into_iter().map(|(result, _)| result).collect())
+    }
+
+    fn search_keyword_candidates(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<ChunkResult>, Box<dyn std::error::Error>> {
+        if !table_exists(&self.conn, "chunks_fts")? {
+            return Ok(Vec::new());
+        }
+
+        let Some(fts_query) = build_fts_query(query) else {
+            return Ok(Vec::new());
+        };
+
+        let mut stmt = self.conn.prepare(
+            "SELECT rowid, file_path, chunk_index, heading_path, content, bm25(chunks_fts) as rank
+             FROM chunks_fts
+             WHERE chunks_fts MATCH ?1
+             ORDER BY rank
+             LIMIT ?2",
+        )?;
+
+        let rows = stmt.query_map(params![fts_query, limit as i64], |row| {
+            let chunk_id: i64 = row.get(0)?;
+            let file_path: String = row.get(1)?;
+            let chunk_index: i64 = row.get(2)?;
+            let heading_path_raw: Option<String> = row.get(3)?;
+            let content: String = row.get(4)?;
+            let rank: f64 = row.get(5)?;
+
+            Ok(ChunkResult {
+                chunk_id,
+                file_path,
+                chunk_index: chunk_index as usize,
+                heading_path: normalize_heading_path(heading_path_raw),
+                content,
+                distance: rank.max(0.0),
+                retrieval_score: None,
+            })
+        })?;
+
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
+    }
+
+    pub fn search_hybrid(
+        &self,
+        query_embedding: &[f32],
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<ChunkResult>, Box<dyn std::error::Error>> {
+        let candidate_limit = (limit.max(1) * 4).min(200);
+        let vector = self.search_vector_candidates(query_embedding, candidate_limit)?;
+        let keyword = self.search_keyword_candidates(query, candidate_limit)?;
+
+        if keyword.is_empty() {
+            return Ok(vector.into_iter().take(limit).collect());
+        }
+        if vector.is_empty() {
+            return Ok(keyword.into_iter().take(limit).collect());
+        }
+
+        let mut merged: HashMap<(String, usize), MergedCandidate> = HashMap::new();
+
+        for (rank, chunk) in vector.into_iter().enumerate() {
+            let key = (chunk.file_path.clone(), chunk.chunk_index);
+            let existing = merged
+                .entry(key)
+                .or_insert_with(|| MergedCandidate { chunk, score: 0.0 });
+            existing.score += rrf_score(rank + 1, 60.0);
+        }
+
+        for (rank, chunk) in keyword.into_iter().enumerate() {
+            let key = (chunk.file_path.clone(), chunk.chunk_index);
+            let existing = merged
+                .entry(key)
+                .or_insert_with(|| MergedCandidate { chunk, score: 0.0 });
+            existing.score += rrf_score(rank + 1, 60.0);
+        }
+
+        let mut ranked = merged.into_values().collect::<Vec<_>>();
+        ranked.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        ranked.truncate(limit);
+
+        Ok(ranked
+            .into_iter()
+            .map(|mut item| {
+                item.chunk.retrieval_score = Some(item.score);
+                item.chunk
+            })
+            .collect())
+    }
+
+    #[allow(dead_code)]
+    pub fn search(
+        &self,
+        query_embedding: &[f32],
+        limit: usize,
+    ) -> Result<Vec<ChunkResult>, Box<dyn std::error::Error>> {
+        self.search_vector_candidates(query_embedding, limit)
+    }
+
+    pub fn save_message(
+        &mut self,
+        conversation_id: i64,
+        role: &str,
+        content: &str,
+        sources: Option<&str>,
+        tool_calls: Option<&str>,
+        timeline: Option<&str>,
+    ) -> Result<i64, Box<dyn std::error::Error>> {
+        self.conn.execute(
+            "INSERT INTO messages (conversation_id, role, content, sources, tool_calls, timeline)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                conversation_id,
+                role,
+                content,
+                sources,
+                tool_calls,
+                timeline
+            ],
+        )?;
+        self.conn.execute(
+            "UPDATE conversations SET updated_at = datetime('now') WHERE id = ?1",
+            params![conversation_id],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn create_conversation(&mut self, title: &str) -> Result<i64, Box<dyn std::error::Error>> {
+        let title = if title.trim().is_empty() {
+            "New conversation"
+        } else {
+            title.trim()
+        };
+        self.conn.execute(
+            "INSERT INTO conversations (title, archived, pinned, sort_order, created_at, updated_at)
+             VALUES (
+                ?1,
+                0,
+                0,
+                COALESCE((SELECT MIN(sort_order) FROM conversations), 1) - 1,
+                datetime('now'),
+                datetime('now')
+             )",
+            params![title],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn conversation_exists(
+        &self,
+        conversation_id: i64,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
+        let exists = self.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM conversations WHERE id = ?1)",
+            params![conversation_id],
+            |row| row.get::<_, i64>(0),
+        )?;
+        Ok(exists == 1)
+    }
+
+    pub fn list_conversations(
+        &self,
+    ) -> Result<Vec<ConversationSummary>, Box<dyn std::error::Error>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT
+                c.id,
+                COALESCE(NULLIF(c.title, ''), 'New conversation') AS title,
+                COALESCE(c.updated_at, c.created_at, datetime('now')) AS updated_at,
+                c.created_at,
+                COUNT(m.id) AS message_count,
+                CAST(COALESCE(c.archived, 0) AS INTEGER) AS archived,
+                CAST(COALESCE(c.pinned, 0) AS INTEGER) AS pinned,
+                c.sort_order
+             FROM conversations c
+             LEFT JOIN messages m ON m.conversation_id = c.id
+             WHERE CAST(COALESCE(c.archived, 0) AS INTEGER) = 0
+             GROUP BY c.id, c.title, c.updated_at, c.created_at, c.archived, c.pinned, c.sort_order
+             ORDER BY
+                CAST(COALESCE(c.pinned, 0) AS INTEGER) DESC,
+                CASE WHEN c.sort_order IS NULL THEN 1 ELSE 0 END ASC,
+                c.sort_order ASC,
+                datetime(COALESCE(c.updated_at, c.created_at, datetime('now'))) DESC,
+                c.id DESC",
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok(ConversationSummary {
+                id: row.get::<_, i64>(0)?.to_string(),
+                title: row.get(1)?,
+                updated_at: row.get(2)?,
+                created_at: row.get(3)?,
+                message_count: row.get(4)?,
+                archived: row.get::<_, i64>(5)? == 1,
+                pinned: row.get::<_, i64>(6)? == 1,
+                sort_order: row.get(7)?,
+            })
+        })?;
+
+        let mut conversations = Vec::new();
+        for row in rows {
+            conversations.push(row?);
+        }
+        Ok(conversations)
+    }
+
+    pub fn list_archived_conversations(
+        &self,
+    ) -> Result<Vec<ConversationSummary>, Box<dyn std::error::Error>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT
+                c.id,
+                COALESCE(NULLIF(c.title, ''), 'New conversation') AS title,
+                COALESCE(c.updated_at, c.created_at, datetime('now')) AS updated_at,
+                c.created_at,
+                COUNT(m.id) AS message_count,
+                CAST(COALESCE(c.archived, 0) AS INTEGER) AS archived,
+                CAST(COALESCE(c.pinned, 0) AS INTEGER) AS pinned,
+                c.sort_order
+             FROM conversations c
+             LEFT JOIN messages m ON m.conversation_id = c.id
+             WHERE CAST(COALESCE(c.archived, 0) AS INTEGER) = 1
+             GROUP BY c.id, c.title, c.updated_at, c.created_at, c.archived, c.pinned, c.sort_order
+             ORDER BY datetime(COALESCE(c.updated_at, c.created_at, datetime('now'))) DESC, c.id DESC",
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok(ConversationSummary {
+                id: row.get::<_, i64>(0)?.to_string(),
+                title: row.get(1)?,
+                updated_at: row.get(2)?,
+                created_at: row.get(3)?,
+                message_count: row.get(4)?,
+                archived: row.get::<_, i64>(5)? == 1,
+                pinned: row.get::<_, i64>(6)? == 1,
+                sort_order: row.get(7)?,
+            })
+        })?;
+
+        let mut conversations = Vec::new();
+        for row in rows {
+            conversations.push(row?);
+        }
+        Ok(conversations)
+    }
+
+    pub fn get_conversation_messages(
+        &self,
+        conversation_id: i64,
+    ) -> Result<Vec<ConversationMessage>, Box<dyn std::error::Error>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, role, content, sources, tool_calls, timeline, created_at
+             FROM messages
+             WHERE conversation_id = ?1
+             ORDER BY datetime(created_at) ASC, id ASC",
+        )?;
+
+        let rows = stmt.query_map(params![conversation_id], |row| {
+            let sources_raw: Option<String> = row.get(3)?;
+            let tool_calls_raw: Option<String> = row.get(4)?;
+            let timeline_raw: Option<String> = row.get(5)?;
+
+            Ok(ConversationMessage {
+                id: row.get::<_, i64>(0)?.to_string(),
+                role: row.get(1)?,
+                content: row.get(2)?,
+                sources: parse_json_field(sources_raw),
+                tool_calls: parse_json_field(tool_calls_raw),
+                timeline: parse_json_field(timeline_raw),
+                created_at: row.get(6)?,
+            })
+        })?;
+
+        let mut messages = Vec::new();
+        for row in rows {
+            messages.push(row?);
+        }
+        Ok(messages)
+    }
+
+    pub fn delete_conversation(
+        &mut self,
+        conversation_id: i64,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let tx = self.conn.transaction()?;
+        tx.execute(
+            "DELETE FROM messages WHERE conversation_id = ?1",
+            params![conversation_id],
+        )?;
+        let deleted = tx.execute(
+            "DELETE FROM conversations WHERE id = ?1",
+            params![conversation_id],
+        )?;
+        if deleted == 0 {
+            return Err(format!("Conversation {} not found", conversation_id).into());
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn delete_message(&mut self, message_id: i64) -> Result<(), Box<dyn std::error::Error>> {
+        let tx = self.conn.transaction()?;
+
+        let conversation_id: i64 = tx.query_row(
+            "SELECT conversation_id FROM messages WHERE id = ?1",
+            params![message_id],
+            |row| row.get(0),
+        )?;
+
+        let deleted = tx.execute("DELETE FROM messages WHERE id = ?1", params![message_id])?;
+        if deleted == 0 {
+            return Err(format!("Message {} not found", message_id).into());
+        }
+
+        tx.execute(
+            "UPDATE conversations
+             SET updated_at = datetime('now')
+             WHERE id = ?1",
+            params![conversation_id],
+        )?;
+
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn get_last_assistant_message_id(
+        &self,
+        conversation_id: i64,
+    ) -> Result<Option<i64>, Box<dyn std::error::Error>> {
+        let assistant_message = self.conn.query_row(
+            "SELECT id
+             FROM messages
+             WHERE conversation_id = ?1
+               AND role = 'assistant'
+             ORDER BY id DESC
+             LIMIT 1",
+            params![conversation_id],
+            |row| row.get::<_, i64>(0),
+        );
+
+        match assistant_message {
+            Ok(message_id) => Ok(Some(message_id)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub fn truncate_messages_from(
+        &mut self,
+        conversation_id: i64,
+        from_message_id: i64,
+    ) -> Result<usize, Box<dyn std::error::Error>> {
+        let tx = self.conn.transaction()?;
+
+        let anchor_exists: i64 = tx.query_row(
+            "SELECT COUNT(*)
+             FROM messages
+             WHERE id = ?1
+               AND conversation_id = ?2",
+            params![from_message_id, conversation_id],
+            |row| row.get(0),
+        )?;
+        if anchor_exists == 0 {
+            return Err(format!(
+                "Message {} not found in conversation {}",
+                from_message_id, conversation_id
+            )
+            .into());
+        }
+
+        let deleted = tx.execute(
+            "DELETE FROM messages
+             WHERE conversation_id = ?1
+               AND id >= ?2",
+            params![conversation_id, from_message_id],
+        )?;
+        if deleted == 0 {
+            return Err(format!(
+                "No messages deleted from conversation {} at anchor {}",
+                conversation_id, from_message_id
+            )
+            .into());
+        }
+
+        tx.execute(
+            "UPDATE conversations
+             SET updated_at = datetime('now')
+             WHERE id = ?1",
+            params![conversation_id],
+        )?;
+
+        tx.commit()?;
+        Ok(deleted)
+    }
+
+    pub fn edit_user_message_and_truncate(
+        &mut self,
+        message_id: i64,
+        content: &str,
+    ) -> Result<i64, Box<dyn std::error::Error>> {
+        let normalized = content.trim();
+        if normalized.is_empty() {
+            return Err("Message content cannot be empty".into());
+        }
+
+        let tx = self.conn.transaction()?;
+
+        let message_context = tx.query_row(
+            "SELECT conversation_id, role
+             FROM messages
+             WHERE id = ?1",
+            params![message_id],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+        );
+        let (conversation_id, role) = match message_context {
+            Ok(value) => value,
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                return Err(format!("Message {} not found", message_id).into())
+            }
+            Err(e) => return Err(e.into()),
+        };
+
+        if role != "user" {
+            return Err(format!("Message {} is not a user message", message_id).into());
+        }
+
+        let updated = tx.execute(
+            "UPDATE messages
+             SET content = ?1,
+                 sources = NULL,
+                 tool_calls = NULL,
+                 timeline = NULL
+             WHERE id = ?2",
+            params![normalized, message_id],
+        )?;
+        if updated == 0 {
+            return Err(format!("Message {} not found", message_id).into());
+        }
+
+        tx.execute(
+            "DELETE FROM messages
+             WHERE conversation_id = ?1
+               AND id > ?2",
+            params![conversation_id, message_id],
+        )?;
+
+        tx.execute(
+            "UPDATE conversations
+             SET updated_at = datetime('now')
+             WHERE id = ?1",
+            params![conversation_id],
+        )?;
+
+        tx.commit()?;
+        Ok(conversation_id)
+    }
+
+    pub fn rename_conversation(
+        &mut self,
+        conversation_id: i64,
+        title: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let normalized = title.trim();
+        if normalized.is_empty() {
+            return Err("Conversation title cannot be empty".into());
+        }
+
+        let updated = self.conn.execute(
+            "UPDATE conversations
+             SET title = ?1,
+                 updated_at = datetime('now')
+             WHERE id = ?2",
+            params![normalized, conversation_id],
+        )?;
+        if updated == 0 {
+            return Err(format!("Conversation {} not found", conversation_id).into());
+        }
+
+        Ok(())
+    }
+
+    pub fn set_conversation_archived(
+        &mut self,
+        conversation_id: i64,
+        archived: bool,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let updated = if archived {
+            self.conn.execute(
+                "UPDATE conversations
+                 SET archived = 1,
+                     pinned = 0,
+                     updated_at = datetime('now')
+                 WHERE id = ?1",
+                params![conversation_id],
+            )?
+        } else {
+            self.conn.execute(
+                "UPDATE conversations
+                 SET archived = 0,
+                     sort_order = COALESCE(
+                        (
+                          SELECT MIN(sort_order)
+                          FROM conversations
+                          WHERE CAST(COALESCE(archived, 0) AS INTEGER) = 0
+                            AND id != ?1
+                        ),
+                        1
+                     ) - 1,
+                     updated_at = datetime('now')
+                 WHERE id = ?1",
+                params![conversation_id],
+            )?
+        };
+        if updated == 0 {
+            return Err(format!("Conversation {} not found", conversation_id).into());
+        }
+        Ok(())
+    }
+
+    pub fn set_conversation_pinned(
+        &mut self,
+        conversation_id: i64,
+        pinned: bool,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let updated = self.conn.execute(
+            "UPDATE conversations
+             SET pinned = ?1,
+                 updated_at = datetime('now')
+             WHERE id = ?2",
+            params![if pinned { 1 } else { 0 }, conversation_id],
+        )?;
+        if updated == 0 {
+            return Err(format!("Conversation {} not found", conversation_id).into());
+        }
+        Ok(())
+    }
+
+    pub fn reorder_conversations(
+        &mut self,
+        conversation_ids: &[i64],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if conversation_ids.is_empty() {
+            return Ok(());
+        }
+
+        let tx = self.conn.transaction()?;
+        for (index, conversation_id) in conversation_ids.iter().enumerate() {
+            tx.execute(
+                "UPDATE conversations
+                 SET sort_order = ?1
+                 WHERE id = ?2
+                   AND CAST(COALESCE(archived, 0) AS INTEGER) = 0",
+                params![(index as i64) + 1, conversation_id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn get_last_user_message(
+        &self,
+        conversation_id: i64,
+        assistant_message_id: Option<i64>,
+    ) -> Result<Option<String>, Box<dyn std::error::Error>> {
+        if let Some(assistant_id) = assistant_message_id {
+            let role = self.conn.query_row(
+                "SELECT role FROM messages WHERE id = ?1 AND conversation_id = ?2",
+                params![assistant_id, conversation_id],
+                |row| row.get::<_, String>(0),
+            );
+
+            match role {
+                Ok(value) => {
+                    if value != "assistant" {
+                        return Err(format!(
+                            "Message {} is not an assistant message in conversation {}",
+                            assistant_id, conversation_id
+                        )
+                        .into());
+                    }
+                }
+                Err(rusqlite::Error::QueryReturnedNoRows) => {
+                    return Err(format!(
+                        "Assistant message {} not found in conversation {}",
+                        assistant_id, conversation_id
+                    )
+                    .into())
+                }
+                Err(e) => return Err(e.into()),
+            }
+
+            let user_message = self.conn.query_row(
+                "SELECT content
+                 FROM messages
+                 WHERE conversation_id = ?1
+                   AND role = 'user'
+                   AND id < ?2
+                 ORDER BY id DESC
+                 LIMIT 1",
+                params![conversation_id, assistant_id],
+                |row| row.get::<_, String>(0),
+            );
+
+            return match user_message {
+                Ok(content) => Ok(Some(content)),
+                Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                Err(e) => Err(e.into()),
+            };
+        }
+
+        let user_message = self.conn.query_row(
+            "SELECT content
+             FROM messages
+             WHERE conversation_id = ?1
+               AND role = 'user'
+             ORDER BY id DESC
+             LIMIT 1",
+            params![conversation_id],
+            |row| row.get::<_, String>(0),
+        );
+
+        match user_message {
+            Ok(content) => Ok(Some(content)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_run(
+        &mut self,
+        run_id: &str,
+        conversation_id: &str,
+        started_at: &str,
+        status: &str,
+        provider: Option<&str>,
+        model: Option<&str>,
+        policy_version: Option<&str>,
+        policy_fingerprint: Option<&str>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        self.conn.execute(
+            "INSERT INTO runs (run_id, conversation_id, started_at, status, provider, model, policy_version, policy_fingerprint)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                run_id,
+                conversation_id,
+                started_at,
+                status,
+                provider,
+                model,
+                policy_version,
+                policy_fingerprint
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn append_run_event(
+        &mut self,
+        run_id: &str,
+        iteration: i64,
+        channel: &str,
+        event_type: &str,
+        payload: &JsonValue,
+        ts: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let payload_json = serde_json::to_string(payload)?;
+        self.conn.execute(
+            "INSERT INTO run_events (run_id, iteration, channel, event_type, payload, ts)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![run_id, iteration, channel, event_type, payload_json, ts],
+        )?;
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn finish_run(
+        &mut self,
+        run_id: &str,
+        finished_at: &str,
+        status: &str,
+        tool_calls: i64,
+        write_calls: i64,
+        verify_failures: i64,
+        duration_ms: i64,
+        token_usage: Option<&str>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        self.conn.execute(
+            "UPDATE runs
+             SET finished_at = ?2,
+                 status = ?3,
+                 tool_calls = ?4,
+                 write_calls = ?5,
+                 verify_failures = ?6,
+                 duration_ms = ?7,
+                 token_usage = ?8
+             WHERE run_id = ?1",
+            params![
+                run_id,
+                finished_at,
+                status,
+                tool_calls,
+                write_calls,
+                verify_failures,
+                duration_ms,
+                token_usage
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_runs(
+        &self,
+        conversation_id: Option<i64>,
+        limit: usize,
+    ) -> Result<Vec<RunSummary>, Box<dyn std::error::Error>> {
+        let query_with_conversation = "
+            SELECT run_id, conversation_id, started_at, finished_at, status, provider, model, policy_version, policy_fingerprint,
+                   tool_calls, write_calls, verify_failures, duration_ms, token_usage
+            FROM runs
+            WHERE conversation_id = ?1
+            ORDER BY datetime(started_at) DESC, run_id DESC
+            LIMIT ?2";
+
+        let query_without_conversation = "
+            SELECT run_id, conversation_id, started_at, finished_at, status, provider, model, policy_version, policy_fingerprint,
+                   tool_calls, write_calls, verify_failures, duration_ms, token_usage
+            FROM runs
+            ORDER BY datetime(started_at) DESC, run_id DESC
+            LIMIT ?1";
+
+        let mut rows_buffer: Vec<RunSummary> = Vec::new();
+
+        if let Some(conversation_id) = conversation_id {
+            let mut stmt = self.conn.prepare(query_with_conversation)?;
+            let rows =
+                stmt.query_map(params![conversation_id.to_string(), limit as i64], |row| {
+                    let token_usage_raw: Option<String> = row.get(13)?;
+                    Ok(RunSummary {
+                        run_id: row.get(0)?,
+                        conversation_id: row.get(1)?,
+                        started_at: row.get(2)?,
+                        finished_at: row.get(3)?,
+                        status: row.get(4)?,
+                        provider: row.get(5)?,
+                        model: row.get(6)?,
+                        policy_version: row.get(7)?,
+                        policy_fingerprint: row.get(8)?,
+                        tool_calls: row.get(9)?,
+                        write_calls: row.get(10)?,
+                        verify_failures: row.get(11)?,
+                        duration_ms: row.get(12)?,
+                        token_usage: parse_json_field(token_usage_raw),
+                    })
+                })?;
+
+            for row in rows {
+                rows_buffer.push(row?);
+            }
+        } else {
+            let mut stmt = self.conn.prepare(query_without_conversation)?;
+            let rows = stmt.query_map(params![limit as i64], |row| {
+                let token_usage_raw: Option<String> = row.get(13)?;
+                Ok(RunSummary {
+                    run_id: row.get(0)?,
+                    conversation_id: row.get(1)?,
+                    started_at: row.get(2)?,
+                    finished_at: row.get(3)?,
+                    status: row.get(4)?,
+                    provider: row.get(5)?,
+                    model: row.get(6)?,
+                    policy_version: row.get(7)?,
+                    policy_fingerprint: row.get(8)?,
+                    tool_calls: row.get(9)?,
+                    write_calls: row.get(10)?,
+                    verify_failures: row.get(11)?,
+                    duration_ms: row.get(12)?,
+                    token_usage: parse_json_field(token_usage_raw),
+                })
+            })?;
+
+            for row in rows {
+                rows_buffer.push(row?);
+            }
+        }
+
+        Ok(rows_buffer)
+    }
+
+    pub fn get_run_events(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<RunEvent>, Box<dyn std::error::Error>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, run_id, iteration, channel, event_type, payload, ts
+             FROM run_events
+             WHERE run_id = ?1
+             ORDER BY iteration ASC, id ASC",
+        )?;
+
+        let rows = stmt.query_map(params![run_id], |row| {
+            let payload_raw: String = row.get(5)?;
+            let payload = serde_json::from_str::<serde_json::Value>(&payload_raw)
+                .unwrap_or(serde_json::Value::String(payload_raw));
+            Ok(RunEvent {
+                id: row.get(0)?,
+                run_id: row.get(1)?,
+                iteration: row.get(2)?,
+                channel: row.get(3)?,
+                event_type: row.get(4)?,
+                payload,
+                ts: row.get(6)?,
+            })
+        })?;
+
+        let mut events = Vec::new();
+        for row in rows {
+            events.push(row?);
+        }
+        Ok(events)
+    }
+}
+
+#[derive(Debug)]
+struct MergedCandidate {
+    chunk: ChunkResult,
+    score: f64,
+}
+
+fn normalize_heading_path(value: Option<String>) -> Option<String> {
+    value.and_then(|heading| {
+        let trimmed = heading.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
+}
+
+fn build_fts_query(query: &str) -> Option<String> {
+    let mut terms = Vec::new();
+    for token in query
+        .split(|ch: char| !ch.is_alphanumeric())
+        .filter(|token| token.chars().count() >= 2)
+    {
+        let cleaned = token.trim().to_lowercase();
+        if cleaned.is_empty() || terms.iter().any(|existing| existing == &cleaned) {
+            continue;
+        }
+        terms.push(cleaned);
+        if terms.len() >= 12 {
+            break;
+        }
+    }
+
+    if terms.is_empty() {
+        return None;
+    }
+
+    Some(
+        terms
+            .iter()
+            .map(|term| format!("\"{}\"*", term.replace('"', "")))
+            .collect::<Vec<_>>()
+            .join(" OR "),
+    )
+}
+
+fn rrf_score(rank: usize, k: f64) -> f64 {
+    1.0 / (k + rank as f64)
+}
+
+fn sync_chunks_fts(conn: &Connection) -> rusqlite::Result<()> {
+    if !table_exists(conn, "chunks_fts")? {
+        return Ok(());
+    }
+
+    let chunk_count: i64 = conn.query_row("SELECT COUNT(*) FROM chunks", [], |row| row.get(0))?;
+    let fts_count: i64 = conn.query_row("SELECT COUNT(*) FROM chunks_fts", [], |row| row.get(0))?;
+
+    if chunk_count == fts_count {
+        return Ok(());
+    }
+
+    conn.execute("DELETE FROM chunks_fts", [])?;
+    conn.execute(
+        "INSERT INTO chunks_fts(rowid, content, file_path, chunk_index, heading_path)
+         SELECT id, content, file_path, chunk_index, COALESCE(heading_path, '')
+         FROM chunks",
+        [],
+    )?;
+    Ok(())
+}
+
+fn parse_json_field(raw: Option<String>) -> Option<serde_json::Value> {
+    raw.and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            serde_json::from_str::<serde_json::Value>(trimmed)
+                .ok()
+                .or(Some(serde_json::Value::String(value)))
+        }
+    })
+}
+
+fn ignore_duplicate_column_error(result: rusqlite::Result<usize>) -> rusqlite::Result<()> {
+    match result {
+        Ok(_) => Ok(()),
+        Err(rusqlite::Error::SqliteFailure(_, Some(msg)))
+            if msg.to_ascii_lowercase().contains("duplicate column name") =>
+        {
+            Ok(())
+        }
+        Err(e) => Err(e),
+    }
+}
+
+fn table_has_column(conn: &Connection, table: &str, column: &str) -> rusqlite::Result<bool> {
+    let sql = format!(
+        "SELECT COUNT(*) FROM pragma_table_info('{}') WHERE name = ?1",
+        table.replace('\'', "''")
+    );
+    let count: i64 = conn.query_row(&sql, params![column], |row| row.get(0))?;
+    Ok(count > 0)
+}
+
+fn table_exists(conn: &Connection, table: &str) -> rusqlite::Result<bool> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type IN ('table', 'view') AND name = ?1",
+        params![table],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
+fn cosine_similarity(a: &[f32], b: &[f32]) -> f64 {
+    if a.len() != b.len() || a.is_empty() {
+        return 0.0;
+    }
+
+    let dot: f64 = a
+        .iter()
+        .zip(b.iter())
+        .map(|(x, y)| (*x as f64) * (*y as f64))
+        .sum();
+    let norm_a: f64 = a
+        .iter()
+        .map(|x| (*x as f64) * (*x as f64))
+        .sum::<f64>()
+        .sqrt();
+    let norm_b: f64 = b
+        .iter()
+        .map(|x| (*x as f64) * (*x as f64))
+        .sum::<f64>()
+        .sqrt();
+
+    if norm_a == 0.0 || norm_b == 0.0 {
+        return 0.0;
+    }
+
+    dot / (norm_a * norm_b)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::VectorDb;
+    use rusqlite::{params, Connection};
+    use std::path::PathBuf;
+
+    fn temp_db_path() -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "meld-vectordb-migration-{}.db",
+            uuid::Uuid::new_v4()
+        ))
+    }
+
+    #[test]
+    fn open_migrates_legacy_conversations_schema() {
+        let db_path = temp_db_path();
+
+        // Legacy schema without title/updated_at and without messages.sources/tool_calls/timeline.
+        let conn = Connection::open(&db_path).expect("open temp sqlite");
+        conn.execute_batch(
+            "
+            CREATE TABLE conversations (
+                id INTEGER PRIMARY KEY,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE TABLE messages (
+                id INTEGER PRIMARY KEY,
+                conversation_id INTEGER NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            ",
+        )
+        .expect("create legacy schema");
+        drop(conn);
+
+        let db = VectorDb::open(&db_path).expect("migrate legacy schema");
+
+        let has_title: i64 = db
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('conversations') WHERE name = 'title'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("check title column");
+        let has_updated_at: i64 = db
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('conversations') WHERE name = 'updated_at'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("check updated_at column");
+        let has_timeline: i64 = db
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name = 'timeline'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("check timeline column");
+
+        assert_eq!(has_title, 1);
+        assert_eq!(has_updated_at, 1);
+        assert_eq!(has_timeline, 1);
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn open_migrates_legacy_chunks_without_heading_path() {
+        let db_path = temp_db_path();
+
+        let conn = Connection::open(&db_path).expect("open temp sqlite");
+        conn.execute_batch(
+            "
+            CREATE TABLE chunks (
+                id INTEGER PRIMARY KEY,
+                file_path TEXT NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                content TEXT NOT NULL,
+                char_start INTEGER NOT NULL,
+                char_end INTEGER NOT NULL,
+                file_hash TEXT NOT NULL,
+                embedding BLOB,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(file_path, chunk_index)
+            );
+            ",
+        )
+        .expect("create legacy chunks");
+        drop(conn);
+
+        let db = VectorDb::open(&db_path).expect("open should migrate legacy chunks");
+
+        let has_heading_path: i64 = db
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('chunks') WHERE name = 'heading_path'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("check heading_path column");
+        assert_eq!(has_heading_path, 1);
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn get_last_user_message_respects_assistant_anchor() {
+        let db_path = temp_db_path();
+        let mut db = VectorDb::open(&db_path).expect("open db");
+
+        let conversation_id = db
+            .create_conversation("regenerate test")
+            .expect("create conversation");
+        let _user_1 = db
+            .save_message(
+                conversation_id,
+                "user",
+                "first user prompt",
+                None,
+                None,
+                None,
+            )
+            .expect("save first user");
+        let assistant_1 = db
+            .save_message(
+                conversation_id,
+                "assistant",
+                "first answer",
+                None,
+                None,
+                None,
+            )
+            .expect("save first assistant");
+        let _user_2 = db
+            .save_message(
+                conversation_id,
+                "user",
+                "second user prompt",
+                None,
+                None,
+                None,
+            )
+            .expect("save second user");
+        let assistant_2 = db
+            .save_message(
+                conversation_id,
+                "assistant",
+                "second answer",
+                None,
+                None,
+                None,
+            )
+            .expect("save second assistant");
+
+        let latest = db
+            .get_last_user_message(conversation_id, None)
+            .expect("query latest user message");
+        assert_eq!(latest, Some("second user prompt".to_string()));
+
+        let before_second_assistant = db
+            .get_last_user_message(conversation_id, Some(assistant_2))
+            .expect("query user message before second assistant");
+        assert_eq!(
+            before_second_assistant,
+            Some("second user prompt".to_string())
+        );
+
+        let before_first_assistant = db
+            .get_last_user_message(conversation_id, Some(assistant_1))
+            .expect("query user message before first assistant");
+        assert_eq!(
+            before_first_assistant,
+            Some("first user prompt".to_string())
+        );
+
+        let err = db
+            .get_last_user_message(conversation_id, Some(assistant_1 - 1))
+            .expect_err("non-assistant anchor must fail");
+        assert!(err.to_string().contains("is not an assistant message"));
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn truncate_messages_from_removes_anchor_and_suffix() {
+        let db_path = temp_db_path();
+        let mut db = VectorDb::open(&db_path).expect("open db");
+
+        let conversation_id = db
+            .create_conversation("truncate test")
+            .expect("create conversation");
+        let _user_1 = db
+            .save_message(conversation_id, "user", "u1", None, None, None)
+            .expect("save u1");
+        let assistant_1 = db
+            .save_message(conversation_id, "assistant", "a1", None, None, None)
+            .expect("save a1");
+        let _user_2 = db
+            .save_message(conversation_id, "user", "u2", None, None, None)
+            .expect("save u2");
+        let assistant_2 = db
+            .save_message(conversation_id, "assistant", "a2", None, None, None)
+            .expect("save a2");
+
+        let deleted = db
+            .truncate_messages_from(conversation_id, assistant_2)
+            .expect("truncate from assistant");
+        assert_eq!(deleted, 1);
+
+        let messages = db
+            .get_conversation_messages(conversation_id)
+            .expect("load messages");
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0].content, "u1");
+        assert_eq!(messages[1].content, "a1");
+        assert_eq!(messages[2].content, "u2");
+
+        let last_assistant = db
+            .get_last_assistant_message_id(conversation_id)
+            .expect("query last assistant id");
+        assert_eq!(last_assistant, Some(assistant_1));
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn edit_user_message_and_truncate_rewrites_history_branch() {
+        let db_path = temp_db_path();
+        let mut db = VectorDb::open(&db_path).expect("open db");
+
+        let conversation_id = db
+            .create_conversation("edit test")
+            .expect("create conversation");
+        let user_1 = db
+            .save_message(conversation_id, "user", "original", None, None, None)
+            .expect("save user");
+        let assistant_1 = db
+            .save_message(conversation_id, "assistant", "a1", None, None, None)
+            .expect("save assistant");
+        let _user_2 = db
+            .save_message(conversation_id, "user", "u2", None, None, None)
+            .expect("save second user");
+
+        let role_err = db
+            .edit_user_message_and_truncate(assistant_1, "should fail")
+            .expect_err("editing assistant message must fail");
+        assert!(role_err.to_string().contains("not a user"));
+
+        let edited_conversation_id = db
+            .edit_user_message_and_truncate(user_1, "updated prompt")
+            .expect("edit user message");
+        assert_eq!(edited_conversation_id, conversation_id);
+
+        let messages = db
+            .get_conversation_messages(conversation_id)
+            .expect("load messages");
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].role, "user");
+        assert_eq!(messages[0].content, "updated prompt");
+
+        let latest_user = db
+            .get_last_user_message(conversation_id, None)
+            .expect("load latest user message");
+        assert_eq!(latest_user, Some("updated prompt".to_string()));
+
+        let err = db
+            .edit_user_message_and_truncate(user_1 + 1000, "x")
+            .expect_err("editing missing message must fail");
+        assert!(err.to_string().contains("not found"));
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn run_ledger_roundtrip_persists_events_and_proof() {
+        let db_path = temp_db_path();
+        let mut db = VectorDb::open(&db_path).expect("open db");
+
+        db.create_run(
+            "run-test-1",
+            "42",
+            "2026-02-14T10:00:00Z",
+            "accepted",
+            Some("openai"),
+            Some("gpt-4.1"),
+            Some("policy.v1"),
+            Some("abc123"),
+        )
+        .expect("create run");
+
+        let event_payload = serde_json::json!({
+            "tool": "kb_update",
+            "proof": {
+                "hash_before": "abc",
+                "hash_after": "def",
+                "readback_ok": true
+            }
+        });
+
+        db.append_run_event(
+            "run-test-1",
+            1,
+            "verification",
+            "agent:verification",
+            &event_payload,
+            "2026-02-14T10:00:05Z",
+        )
+        .expect("append run event");
+
+        db.finish_run(
+            "run-test-1",
+            "2026-02-14T10:00:10Z",
+            "completed",
+            3,
+            1,
+            0,
+            10000,
+            Some(
+                &serde_json::to_string(&serde_json::json!({
+                    "input_tokens": 120,
+                    "output_tokens": 45,
+                    "total_tokens": 165,
+                    "reasoning_tokens": 10,
+                }))
+                .expect("serialize token usage"),
+            ),
+        )
+        .expect("finish run");
+
+        let status: String = db
+            .conn
+            .query_row(
+                "SELECT status FROM runs WHERE run_id = ?1",
+                params!["run-test-1"],
+                |row| row.get(0),
+            )
+            .expect("query run status");
+        assert_eq!(status, "completed");
+
+        let payload_raw: String = db
+            .conn
+            .query_row(
+                "SELECT payload FROM run_events WHERE run_id = ?1",
+                params!["run-test-1"],
+                |row| row.get(0),
+            )
+            .expect("query run event payload");
+        let payload: serde_json::Value =
+            serde_json::from_str(&payload_raw).expect("parse run event payload");
+        assert_eq!(
+            payload
+                .pointer("/proof/hash_before")
+                .and_then(|v| v.as_str()),
+            Some("abc")
+        );
+        assert_eq!(
+            payload
+                .pointer("/proof/hash_after")
+                .and_then(|v| v.as_str()),
+            Some("def")
+        );
+        assert_eq!(
+            payload
+                .pointer("/proof/readback_ok")
+                .and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        let token_usage_raw: Option<String> = db
+            .conn
+            .query_row(
+                "SELECT token_usage FROM runs WHERE run_id = ?1",
+                params!["run-test-1"],
+                |row| row.get(0),
+            )
+            .expect("query run token usage");
+        let token_usage: serde_json::Value = serde_json::from_str(
+            token_usage_raw
+                .as_deref()
+                .expect("token usage should be present"),
+        )
+        .expect("parse token usage");
+        assert_eq!(
+            token_usage.get("input_tokens"),
+            Some(&serde_json::json!(120))
+        );
+        assert_eq!(
+            token_usage.get("output_tokens"),
+            Some(&serde_json::json!(45))
+        );
+        assert_eq!(
+            token_usage.get("total_tokens"),
+            Some(&serde_json::json!(165))
+        );
+
+        let _ = std::fs::remove_file(db_path);
+    }
+}

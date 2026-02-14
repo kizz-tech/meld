@@ -1,0 +1,54 @@
+pub mod commands;
+
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_shell::init())
+        .invoke_handler(tauri::generate_handler![
+            commands::vault::select_vault,
+            commands::vault::get_vault_info,
+            commands::vault::reindex,
+            commands::conversations::create_conversation,
+            commands::conversations::list_conversations,
+            commands::conversations::list_archived_conversations,
+            commands::conversations::list_runs,
+            commands::conversations::get_run_events,
+            commands::conversations::get_conversation_messages,
+            commands::conversations::delete_message,
+            commands::conversations::rename_conversation,
+            commands::conversations::archive_conversation,
+            commands::conversations::unarchive_conversation,
+            commands::conversations::pin_conversation,
+            commands::conversations::unpin_conversation,
+            commands::conversations::reorder_conversations,
+            commands::conversations::cancel_active_run,
+            commands::conversations::send_message,
+            commands::conversations::regenerate_last_response,
+            commands::conversations::edit_user_message,
+            commands::settings::get_config,
+            commands::settings::get_provider_catalog,
+            commands::settings::set_api_key,
+            commands::settings::set_oauth_client,
+            commands::settings::set_auth_mode,
+            commands::settings::start_oauth,
+            commands::settings::finish_oauth,
+            commands::settings::disconnect_oauth,
+            commands::settings::set_model,
+            commands::settings::set_embedding_model,
+            commands::settings::set_fallback_model,
+            commands::settings::set_user_language,
+            commands::history::get_history,
+            commands::history::revert_commit,
+            commands::history::open_file_external,
+            commands::vault::list_vault_files,
+            commands::vault::list_vault_entries,
+            commands::vault::preview_file,
+            commands::vault::resolve_or_create_note,
+            commands::vault::create_note,
+            commands::vault::create_folder,
+            commands::vault::archive_vault_entry,
+            commands::vault::move_vault_entry,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running meld");
+}

@@ -1,0 +1,191 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0A0A09;
+  --color-bg-secondary: #131210;
+  --color-bg-tertiary: #1A1816;
+  --color-border: #242118;
+  --color-border-hover: #322E24;
+  --color-border-focus: #3D382E;
+  --color-text: #E8E4DC;
+  --color-text-secondary: #8A847A;
+  --color-text-muted: #5A5650;
+  --color-accent: #C9A84C;
+  --color-accent-dim: #9A7D3A;
+  --color-success: #4ade80;
+  --color-error: #f87171;
+  --color-warning: #fbbf24;
+  --shadow-accent-glow: color-mix(in srgb, var(--color-accent) 20%, transparent);
+  --shadow-surface-glow: color-mix(in srgb, var(--color-text) 10%, transparent);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-instrument-serif);
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans, ui-sans-serif, system-ui, sans-serif);
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.022;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 200px 200px;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* Pill badges (StatusBar) */
+.pill-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.1875rem 0.625rem;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--color-border) 40%, transparent);
+  font-size: 0.6875rem;
+  line-height: 1.25rem;
+}
+
+.pill-dot {
+  display: inline-block;
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 9999px;
+  background-color: var(--color-text-muted);
+}
+
+/* Fade-in animation */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Message enter animation */
+@keyframes message-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-message-enter {
+  animation: message-enter 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+
+/* Warm prose — override cool Tailwind grays */
+.prose-invert {
+  --tw-prose-body: var(--color-text);
+  --tw-prose-headings: var(--color-text);
+  --tw-prose-lead: var(--color-text-secondary);
+  --tw-prose-links: var(--color-text-secondary);
+  --tw-prose-bold: var(--color-text);
+  --tw-prose-counters: var(--color-text-secondary);
+  --tw-prose-bullets: var(--color-text-muted);
+  --tw-prose-hr: var(--color-border);
+  --tw-prose-quotes: var(--color-text);
+  --tw-prose-quote-borders: var(--color-border-hover);
+  --tw-prose-captions: var(--color-text-muted);
+  --tw-prose-code: var(--color-text);
+  --tw-prose-pre-code: var(--color-text-secondary);
+  --tw-prose-pre-bg: rgba(255, 255, 255, 0.03);
+  --tw-prose-th-borders: var(--color-border-hover);
+  --tw-prose-td-borders: var(--color-border);
+}
+
+.prose pre {
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 0.75rem;
+}
+
+.prose :where(code):not(:where(pre, [class~="not-prose"], [class~="not-prose"] *)) {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  padding: 0.125rem 0.375rem;
+  font-size: 0.85em;
+  font-weight: 400;
+}
+
+.prose :where(code):not(:where(pre, [class~="not-prose"], [class~="not-prose"] *))::before,
+.prose :where(code):not(:where(pre, [class~="not-prose"], [class~="not-prose"] *))::after {
+  content: none;
+}
+
+::selection {
+  background: rgba(232, 228, 220, 0.12);
+  color: var(--color-text);
+}
+
+.border-border-hover {
+  border-color: var(--color-border-hover);
+}
+
+.border-border-focus {
+  border-color: var(--color-border-focus);
+}
+
+@keyframes overlay-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-overlay-fade {
+  animation: overlay-fade 0.15s ease-out;
+}
+
+.animate-dialog-in {
+  animation: dialog-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}

@@ -1,0 +1,14 @@
+name: kb-retrieval-core
+cases:
+  - id: hyde-strategy
+    query: "How to improve project strategy planning?"
+    expected_paths:
+      - docs/strategy.md
+  - id: exact-entity
+    query: "meeting with John on Tuesday"
+    expected_paths:
+      - notes/meetings/john-tuesday.md
+  - id: architecture-term
+    query: "provider registry pattern"
+    expected_paths:
+      - docs/provider-registry.md

@@ -1,0 +1,12 @@
+pub mod config;
+pub mod embeddings;
+pub mod emitter;
+pub mod git;
+pub mod llm;
+pub mod markdown;
+pub mod mcp;
+pub mod oauth;
+pub mod providers;
+pub mod rag;
+pub mod vault;
+pub mod vectordb;

@@ -1,0 +1,48 @@
+[package]
+name = "meld"
+version = "0.1.0"
+description = "Superpersonalized AI agent with a shared knowledge base"
+authors = ["kizz-tech"]
+license = "AGPL-3.0"
+edition = "2021"
+
+[lib]
+name = "meld_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "meld"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml_ng = "0.10"
+toml = "1"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.13", features = ["json", "form", "stream"] }
+rusqlite = { version = "0.38", features = ["bundled"] }
+git2 = "0.20"
+pulldown-cmark = "0.13"
+walkdir = "2"
+sha2 = "0.10"
+hex = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4"] }
+thiserror = "2"
+log = "0.4"
+env_logger = "0.11"
+futures = "0.3"
+tokio-stream = "0.1"
+open = "5"
+dirs = "6"
+notify-debouncer-full = "0.7"
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
