@@ -99,12 +99,19 @@ export default function SettingsPanel() {
     setTimeout(() => setSaved(false), 2000);
   }
 
+const [reindexError, setReindexError] = useState<string | null>(null);
+
+
   async function handleReindex() {
     store.setIndexing(true);
+    setReindexError(null);
     try {
       await reindex();
     } catch (e) {
       console.error("Reindex failed:", e);
+       setReindexError(
+            "Reindex failed. Please check API key or database connection."
+        );
     }
     store.setIndexing(false);
   }
@@ -172,6 +179,12 @@ export default function SettingsPanel() {
         >
           {store.isIndexing ? "Indexing..." : "Reindex"}
         </button>
+        
+        {reindexError && (
+        <p className="text-error text-xs mt-2">
+          {reindexError}
+        </p>
+        )}
       </section>
 
       {/* Chat Model */}
