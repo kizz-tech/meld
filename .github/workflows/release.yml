@@ -9,17 +9,16 @@ permissions:
   contents: write
 
 jobs:
-  changelog:
+  create-release:
     runs-on: ubuntu-22.04
-    outputs:
-      body: ${{ steps.changelog.outputs.body }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Generate changelog
-        id: changelog
+      - name: Generate changelog and create draft release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           PREV_TAG=$(git tag --sort=-creatordate | head -2 | tail -1 2>/dev/null || echo "")
           CURR_TAG="${GITHUB_REF_NAME}"
@@ -43,13 +42,13 @@ jobs:
 
           BODY+="**Full Changelog:** https://github.com/kizz-tech/meld/compare/${FROM}...${CURR_TAG}"
 
-          # Write to output (multiline)
-          echo "body<<CHANGELOG_EOF" >> "$GITHUB_OUTPUT"
-          echo "$BODY" >> "$GITHUB_OUTPUT"
-          echo "CHANGELOG_EOF" >> "$GITHUB_OUTPUT"
+          gh release create "$CURR_TAG" \
+            --title "meld $CURR_TAG" \
+            --notes "$BODY" \
+            --draft
 
   build:
-    needs: changelog
+    needs: create-release
     strategy:
       fail-fast: false
       matrix:
@@ -95,8 +94,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: "meld ${{ github.ref_name }}"
-          releaseBody: ${{ needs.changelog.outputs.body }}
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
