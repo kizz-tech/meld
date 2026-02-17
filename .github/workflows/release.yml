@@ -9,7 +9,47 @@ permissions:
   contents: write
 
 jobs:
+  changelog:
+    runs-on: ubuntu-22.04
+    outputs:
+      body: ${{ steps.changelog.outputs.body }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREV_TAG=$(git tag --sort=-creatordate | head -2 | tail -1 2>/dev/null || echo "")
+          CURR_TAG="${GITHUB_REF_NAME}"
+
+          if [ -z "$PREV_TAG" ] || [ "$PREV_TAG" = "$CURR_TAG" ]; then
+            FROM=$(git rev-list --max-parents=0 HEAD)
+          else
+            FROM="$PREV_TAG"
+          fi
+
+          BODY="## What's Changed"$'\n\n'
+
+          for TYPE_LABEL in "feat:Features" "fix:Bug Fixes" "docs:Documentation" "refactor:Refactoring" "perf:Performance" "chore:Chores"; do
+            TYPE="${TYPE_LABEL%%:*}"
+            LABEL="${TYPE_LABEL##*:}"
+            COMMITS=$(git log "$FROM".."$CURR_TAG" --oneline --no-merges --grep="^${TYPE}" --format="- %s (%h)" 2>/dev/null || true)
+            if [ -n "$COMMITS" ]; then
+              BODY+="### ${LABEL}"$'\n\n'"${COMMITS}"$'\n\n'
+            fi
+          done
+
+          BODY+="**Full Changelog:** https://github.com/kizz-tech/meld/compare/${FROM}...${CURR_TAG}"
+
+          # Write to output (multiline)
+          echo "body<<CHANGELOG_EOF" >> "$GITHUB_OUTPUT"
+          echo "$BODY" >> "$GITHUB_OUTPUT"
+          echo "CHANGELOG_EOF" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: changelog
     strategy:
       fail-fast: false
       matrix:
@@ -56,7 +96,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "meld ${{ github.ref_name }}"
-          releaseBody: "See the assets below to download and install meld for your platform."
+          releaseBody: ${{ needs.changelog.outputs.body }}
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
