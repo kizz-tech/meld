@@ -63,6 +63,7 @@ export default function SettingsPanel() {
   const [embeddingProvider, setEmbeddingProviderLocal] = useState("");
   const [embeddingModelId, setEmbeddingModelIdLocal] = useState("");
   const [userLanguage, setUserLanguageLocal] = useState("");
+  const [reindexError, setReindexError] = useState<string | null>(null);
 
   useEffect(() => {
     getConfig().then((config) => {
@@ -101,10 +102,14 @@ export default function SettingsPanel() {
 
   async function handleReindex() {
     store.setIndexing(true);
+    setReindexError(null);
     try {
       await reindex();
     } catch (e) {
       console.error("Reindex failed:", e);
+      setReindexError(
+        `Reindex failed: ${e instanceof Error ? e.message : String(e)}`
+      );
     }
     store.setIndexing(false);
   }
@@ -171,7 +176,12 @@ export default function SettingsPanel() {
           className="text-xs px-3 py-1.5 bg-bg-tertiary/80 rounded-lg hover:bg-border transition-colors disabled:opacity-50"
         >
           {store.isIndexing ? "Indexing..." : "Reindex"}
-        </button>
+        </button>    
+        {reindexError && (
+          <p className="text-error text-xs mt-2">
+            {reindexError}
+          </p>
+        )}
       </section>
 
       {/* Chat Model */}
