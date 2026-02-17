@@ -28,7 +28,7 @@ toml = "1"
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.13", features = ["json", "form", "stream"] }
 rusqlite = { version = "0.38", features = ["bundled"] }
-git2 = "0.20"
+git2 = { version = "0.20", features = ["vendored-openssl"] }
 pulldown-cmark = "0.13"
 walkdir = "2"
 sha2 = "0.10"
