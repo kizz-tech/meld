@@ -26,8 +26,9 @@ Most AI forgets you after every chat. meld doesn't.
 
 You and AI share the same files — both read, write, and build on the same knowledge base. Point meld at your folder of Markdown notes. It indexes them, answers questions with source citations, creates new notes autonomously, and gets smarter from every interaction. Every AI edit is auto-committed to git so you can always roll back.
 
-<!-- TODO: Replace with actual screenshot/GIF -->
-<!-- ![meld demo](artifacts/screenshots/demo.gif) -->
+<p align="center">
+  <img src="artifacts/hero.png" alt="meld — chat with AI while browsing the note it created" width="800" />
+</p>
 
 ## Why meld
 
