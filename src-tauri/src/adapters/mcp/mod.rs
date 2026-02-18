@@ -56,6 +56,8 @@ impl ToolRegistry {
         registry.register(KbCreateTool::new());
         registry.register(KbUpdateTool::new());
         registry.register(KbListTool::new());
+        registry.register(KbHistoryTool::new());
+        registry.register(KbDiffTool::new());
         registry.register(WebSearchTool::new(has_web_search));
         registry
     }
@@ -374,6 +376,82 @@ impl ToolExecutor for KbListTool {
             let started = Instant::now();
             let trace_id = uuid::Uuid::new_v4().to_string();
             execute_kb_list(ctx, &args, &trace_id, started)
+        })
+    }
+}
+
+struct KbHistoryTool {
+    definition: ToolDefinition,
+}
+
+impl KbHistoryTool {
+    fn new() -> Self {
+        Self {
+            definition: ToolDefinition {
+                name: "kb_history".to_string(),
+                description: "Use this to inspect the change history of the vault or a specific note. Returns a list of commits with metadata (id, message, timestamp, files_changed). Errors: history_failed (retriable). Edge cases: if no git history exists, returns empty array."
+                    .to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "Optional file path to filter history for a specific note" },
+                        "limit": { "type": "integer", "description": "Max commits to return (default 20)" }
+                    }
+                }),
+                permission: Permission::Read,
+            },
+        }
+    }
+}
+
+impl ToolExecutor for KbHistoryTool {
+    fn definition(&self) -> &ToolDefinition {
+        &self.definition
+    }
+
+    fn execute<'a>(&'a self, args: Value, ctx: &'a ToolContext<'a>) -> ToolFuture<'a> {
+        Box::pin(async move {
+            let started = Instant::now();
+            let trace_id = uuid::Uuid::new_v4().to_string();
+            execute_kb_history(ctx, &args, &trace_id, started)
+        })
+    }
+}
+
+struct KbDiffTool {
+    definition: ToolDefinition,
+}
+
+impl KbDiffTool {
+    fn new() -> Self {
+        Self {
+            definition: ToolDefinition {
+                name: "kb_diff".to_string(),
+                description: "Use this to see the unified diff (patch) of a specific commit. Returns commit metadata plus a patch string. Use kb_history first to discover commit IDs. Errors: invalid_arguments (missing commit_id), diff_failed (retriable)."
+                    .to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "commit_id": { "type": "string", "description": "Git commit SHA to inspect" }
+                    },
+                    "required": ["commit_id"]
+                }),
+                permission: Permission::Read,
+            },
+        }
+    }
+}
+
+impl ToolExecutor for KbDiffTool {
+    fn definition(&self) -> &ToolDefinition {
+        &self.definition
+    }
+
+    fn execute<'a>(&'a self, args: Value, ctx: &'a ToolContext<'a>) -> ToolFuture<'a> {
+        Box::pin(async move {
+            let started = Instant::now();
+            let trace_id = uuid::Uuid::new_v4().to_string();
+            execute_kb_diff(ctx, &args, &trace_id, started)
         })
     }
 }
@@ -1083,6 +1161,108 @@ fn execute_kb_list(ctx: &McpContext<'_>, args: &Value, trace_id: &str, started: 
     )
 }
 
+fn execute_kb_history(
+    ctx: &McpContext<'_>,
+    args: &Value,
+    trace_id: &str,
+    started: Instant,
+) -> Value {
+    let path_filter = args.get("path").and_then(|v| v.as_str());
+    let limit = args
+        .get("limit")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as usize)
+        .or(Some(20));
+
+    let commits = match crate::adapters::git::get_history(ctx.vault_path, path_filter, limit) {
+        Ok(entries) => entries,
+        Err(error) => {
+            return error_envelope(
+                "kb_history",
+                "kb.history",
+                None,
+                json!({}),
+                "history_failed",
+                error.to_string(),
+                true,
+                started,
+                trace_id.to_string(),
+            )
+        }
+    };
+
+    envelope(
+        "kb_history",
+        "kb.history",
+        true,
+        None,
+        json!({
+            "summary": format!("Found {} commits", commits.len()),
+            "count": commits.len(),
+            "commits": commits,
+        }),
+        json!({}),
+        None,
+        started,
+        trace_id.to_string(),
+    )
+}
+
+fn execute_kb_diff(ctx: &McpContext<'_>, args: &Value, trace_id: &str, started: Instant) -> Value {
+    let commit_id = match args.get("commit_id").and_then(|v| v.as_str()) {
+        Some(id) => id,
+        None => {
+            return error_envelope(
+                "kb_diff",
+                "kb.diff",
+                None,
+                json!({}),
+                "invalid_arguments",
+                "Missing commit_id",
+                false,
+                started,
+                trace_id.to_string(),
+            )
+        }
+    };
+
+    let diff = match crate::adapters::git::get_commit_diff(ctx.vault_path, commit_id) {
+        Ok(diff) => diff,
+        Err(error) => {
+            return error_envelope(
+                "kb_diff",
+                "kb.diff",
+                None,
+                json!({}),
+                "diff_failed",
+                error.to_string(),
+                true,
+                started,
+                trace_id.to_string(),
+            )
+        }
+    };
+
+    envelope(
+        "kb_diff",
+        "kb.diff",
+        true,
+        None,
+        json!({
+            "summary": format!("Diff for commit {}", &diff.id[..8.min(diff.id.len())]),
+            "commit_id": diff.id,
+            "message": diff.message,
+            "timestamp": diff.timestamp,
+            "files_changed": diff.files_changed,
+            "patch": diff.patch,
+        }),
+        json!({}),
+        None,
+        started,
+        trace_id.to_string(),
+    )
+}
+
 async fn execute_kb_search(
     ctx: &McpContext<'_>,
     args: &Value,
@@ -1758,6 +1938,166 @@ mod tests {
                 .pointer("/target/resolved_path")
                 .and_then(|v| v.as_str()),
             Some("para/x.md")
+        );
+
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[tokio::test]
+    async fn kb_history_returns_commits() {
+        let _guard = test_guard();
+        let vault = temp_vault();
+        std::fs::create_dir_all(&vault).expect("create temp vault");
+        let db_path = vault.join(".meld").join("index.db");
+
+        crate::adapters::vault::write_note(&vault, "note.md", "v1").expect("write v1");
+        crate::adapters::git::auto_commit(&vault, "commit v1").expect("commit v1");
+
+        let ctx = McpContext {
+            vault_path: &vault,
+            db_path: &db_path,
+            embedding_key: "",
+            embedding_model_id: "openai:text-embedding-3-small",
+            tavily_api_key: "",
+        };
+
+        let result = execute_tool(&ctx, "kb_history", &json!({})).await;
+
+        assert_eq!(result.get("ok").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(result.get("tool").and_then(|v| v.as_str()), Some("kb_history"));
+        let count = result.pointer("/result/count").and_then(|v| v.as_u64()).unwrap_or(0);
+        assert!(count >= 1);
+
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[tokio::test]
+    async fn kb_history_path_filter_works() {
+        let _guard = test_guard();
+        let vault = temp_vault();
+        std::fs::create_dir_all(&vault).expect("create temp vault");
+        let db_path = vault.join(".meld").join("index.db");
+
+        crate::adapters::vault::write_note(&vault, "a.md", "a1").expect("write a");
+        crate::adapters::vault::write_note(&vault, "b.md", "b1").expect("write b");
+        crate::adapters::git::auto_commit(&vault, "seed").expect("seed");
+
+        crate::adapters::vault::write_note(&vault, "a.md", "a2").expect("write a2");
+        crate::adapters::git::auto_commit_files(&vault, &[vault.join("a.md")], "edit a")
+            .expect("commit a");
+
+        let ctx = McpContext {
+            vault_path: &vault,
+            db_path: &db_path,
+            embedding_key: "",
+            embedding_model_id: "openai:text-embedding-3-small",
+            tavily_api_key: "",
+        };
+
+        let result = execute_tool(&ctx, "kb_history", &json!({ "path": "a.md" })).await;
+        assert_eq!(result.get("ok").and_then(|v| v.as_bool()), Some(true));
+
+        let commits = result
+            .pointer("/result/commits")
+            .and_then(|v| v.as_array())
+            .expect("commits array");
+        assert_eq!(commits.len(), 1); // edit a (seed has no parent → empty files_changed)
+
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[tokio::test]
+    async fn kb_diff_returns_patch() {
+        let _guard = test_guard();
+        let vault = temp_vault();
+        std::fs::create_dir_all(&vault).expect("create temp vault");
+        let db_path = vault.join(".meld").join("index.db");
+
+        crate::adapters::vault::write_note(&vault, "note.md", "line one\n").expect("write v1");
+        crate::adapters::git::auto_commit(&vault, "v1").expect("commit v1");
+
+        crate::adapters::vault::write_note(&vault, "note.md", "line one\nline two\n")
+            .expect("write v2");
+        crate::adapters::git::auto_commit(&vault, "v2").expect("commit v2");
+
+        let history =
+            crate::adapters::git::get_history(&vault, None, Some(1)).expect("history");
+        let commit_id = &history.first().expect("latest").id;
+
+        let ctx = McpContext {
+            vault_path: &vault,
+            db_path: &db_path,
+            embedding_key: "",
+            embedding_model_id: "openai:text-embedding-3-small",
+            tavily_api_key: "",
+        };
+
+        let result = execute_tool(&ctx, "kb_diff", &json!({ "commit_id": commit_id })).await;
+        assert_eq!(result.get("ok").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(result.get("tool").and_then(|v| v.as_str()), Some("kb_diff"));
+
+        let patch = result
+            .pointer("/result/patch")
+            .and_then(|v| v.as_str())
+            .expect("patch string");
+        assert!(patch.contains("+line two"));
+
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[tokio::test]
+    async fn kb_diff_missing_commit_id_returns_error() {
+        let _guard = test_guard();
+        let vault = temp_vault();
+        std::fs::create_dir_all(&vault).expect("create temp vault");
+        let db_path = vault.join(".meld").join("index.db");
+
+        let ctx = McpContext {
+            vault_path: &vault,
+            db_path: &db_path,
+            embedding_key: "",
+            embedding_model_id: "openai:text-embedding-3-small",
+            tavily_api_key: "",
+        };
+
+        let result = execute_tool(&ctx, "kb_diff", &json!({})).await;
+        assert_eq!(result.get("ok").and_then(|v| v.as_bool()), Some(false));
+        assert_eq!(
+            result.pointer("/error/code").and_then(|v| v.as_str()),
+            Some("invalid_arguments")
+        );
+
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[tokio::test]
+    async fn kb_diff_invalid_commit_returns_error() {
+        let _guard = test_guard();
+        let vault = temp_vault();
+        std::fs::create_dir_all(&vault).expect("create temp vault");
+        let db_path = vault.join(".meld").join("index.db");
+
+        crate::adapters::vault::write_note(&vault, "note.md", "init").expect("write");
+        crate::adapters::git::auto_commit(&vault, "init").expect("commit");
+
+        let ctx = McpContext {
+            vault_path: &vault,
+            db_path: &db_path,
+            embedding_key: "",
+            embedding_model_id: "openai:text-embedding-3-small",
+            tavily_api_key: "",
+        };
+
+        let result = execute_tool(
+            &ctx,
+            "kb_diff",
+            &json!({ "commit_id": "0000000000000000000000000000000000000000" }),
+        )
+        .await;
+        assert_eq!(result.get("ok").and_then(|v| v.as_bool()), Some(false));
+        assert_eq!(
+            result.pointer("/error/code").and_then(|v| v.as_str()),
+            Some("diff_failed")
         );
 
         let _ = std::fs::remove_dir_all(vault);

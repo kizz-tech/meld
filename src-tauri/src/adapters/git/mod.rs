@@ -1,7 +1,9 @@
-use git2::{IndexEntry, IndexTime, Repository, Signature};
+use git2::{DiffFormat, IndexEntry, IndexTime, Repository, Signature};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+
+const MAX_WALK: usize = 500;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct HistoryEntry {
@@ -9,6 +11,15 @@ pub struct HistoryEntry {
     pub message: String,
     pub timestamp: i64,
     pub files_changed: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CommitDiff {
+    pub id: String,
+    pub message: String,
+    pub timestamp: i64,
+    pub files_changed: Vec<String>,
+    pub patch: String,
 }
 
 const MELD_GITIGNORE_ENTRY: &str = ".meld/";
@@ -197,16 +208,25 @@ pub fn auto_commit_files(
     Ok(())
 }
 
-pub fn get_history(vault_path: &Path) -> Result<Vec<HistoryEntry>, Box<dyn std::error::Error>> {
+pub fn get_history(
+    vault_path: &Path,
+    path_filter: Option<&str>,
+    limit: Option<usize>,
+) -> Result<Vec<HistoryEntry>, Box<dyn std::error::Error>> {
     let repo = Repository::open_bare(meld_git_dir(vault_path))?;
 
     let mut revwalk = repo.revwalk()?;
     revwalk.push_head()?;
     revwalk.set_sorting(git2::Sort::TIME)?;
 
+    let target = limit.unwrap_or(50);
     let mut entries = Vec::new();
 
-    for oid in revwalk.take(50) {
+    for (walked, oid) in revwalk.enumerate() {
+        if walked >= MAX_WALK || entries.len() >= target {
+            break;
+        }
+
         let oid = oid?;
         let commit = repo.find_commit(oid)?;
 
@@ -225,6 +245,13 @@ pub fn get_history(vault_path: &Path) -> Result<Vec<HistoryEntry>, Box<dyn std::
             }
         }
 
+        // Skip commits that don't touch the filtered path
+        if let Some(filter) = path_filter {
+            if !files_changed.iter().any(|f| f == filter) {
+                continue;
+            }
+        }
+
         entries.push(HistoryEntry {
             id: oid.to_string(),
             message,
@@ -234,6 +261,47 @@ pub fn get_history(vault_path: &Path) -> Result<Vec<HistoryEntry>, Box<dyn std::
     }
 
     Ok(entries)
+}
+
+pub fn get_commit_diff(
+    vault_path: &Path,
+    commit_id: &str,
+) -> Result<CommitDiff, Box<dyn std::error::Error>> {
+    let repo = Repository::open_bare(meld_git_dir(vault_path))?;
+    let oid = git2::Oid::from_str(commit_id)?;
+    let commit = repo.find_commit(oid)?;
+
+    let commit_tree = commit.tree()?;
+    let parent_tree = commit.parents().next().and_then(|p| p.tree().ok());
+
+    let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&commit_tree), None)?;
+
+    let mut files_changed = Vec::new();
+    for delta in diff.deltas() {
+        if let Some(path) = delta.new_file().path() {
+            files_changed.push(path.to_string_lossy().to_string());
+        }
+    }
+
+    let mut patch = String::new();
+    diff.print(DiffFormat::Patch, |_delta, _hunk, line| {
+        let origin = line.origin();
+        if origin == '+' || origin == '-' || origin == ' ' {
+            patch.push(origin);
+        }
+        if let Ok(content) = std::str::from_utf8(line.content()) {
+            patch.push_str(content);
+        }
+        true
+    })?;
+
+    Ok(CommitDiff {
+        id: oid.to_string(),
+        message: commit.message().unwrap_or("").to_string(),
+        timestamp: commit.time().seconds(),
+        files_changed,
+        patch,
+    })
 }
 
 pub fn revert_commit(vault_path: &Path, commit_id: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -268,7 +336,7 @@ pub fn revert_commit(vault_path: &Path, commit_id: &str) -> Result<(), Box<dyn s
 
 #[cfg(test)]
 mod tests {
-    use super::{auto_commit, auto_commit_files, get_history, revert_commit};
+    use super::{auto_commit, auto_commit_files, get_commit_diff, get_history, revert_commit};
     use std::path::PathBuf;
 
     fn temp_vault() -> PathBuf {
@@ -285,7 +353,7 @@ mod tests {
 
         assert!(vault.join(".meld").join(".git").exists());
         assert!(!vault.join(".git").exists());
-        assert!(!get_history(&vault).expect("history").is_empty());
+        assert!(!get_history(&vault, None, None).expect("history").is_empty());
 
         let _ = std::fs::remove_dir_all(vault);
     }
@@ -316,7 +384,7 @@ mod tests {
         std::fs::write(vault.join("note.md"), "v2").expect("write v2");
         auto_commit(&vault, "commit v2").expect("auto commit v2");
 
-        let history = get_history(&vault).expect("history");
+        let history = get_history(&vault, None, None).expect("history");
         let latest_commit = history.first().expect("latest commit");
         revert_commit(&vault, &latest_commit.id).expect("revert commit");
 
@@ -340,11 +408,71 @@ mod tests {
         std::fs::write(&note_b, "b2").expect("write b2");
         auto_commit_files(&vault, &[note_a.clone()], "commit a only").expect("commit scoped file");
 
-        let history = get_history(&vault).expect("history");
+        let history = get_history(&vault, None, None).expect("history");
         let latest = history.first().expect("latest commit");
         assert_eq!(latest.message, "commit a only");
         assert!(latest.files_changed.iter().any(|path| path == "a.md"));
         assert!(!latest.files_changed.iter().any(|path| path == "b.md"));
+
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[test]
+    fn get_history_path_filter_returns_only_matching_commits() {
+        let vault = temp_vault();
+        std::fs::create_dir_all(&vault).expect("create temp vault");
+        std::fs::write(vault.join("a.md"), "a1").expect("write a1");
+        std::fs::write(vault.join("b.md"), "b1").expect("write b1");
+        auto_commit(&vault, "seed both").expect("seed commit");
+
+        std::fs::write(vault.join("a.md"), "a2").expect("write a2");
+        auto_commit_files(&vault, &[vault.join("a.md")], "edit a").expect("commit a");
+
+        std::fs::write(vault.join("b.md"), "b2").expect("write b2");
+        auto_commit_files(&vault, &[vault.join("b.md")], "edit b").expect("commit b");
+
+        let all = get_history(&vault, None, None).expect("all history");
+        assert_eq!(all.len(), 3);
+
+        let only_a = get_history(&vault, Some("a.md"), None).expect("filter a.md");
+        assert!(only_a.iter().all(|e| e.files_changed.contains(&"a.md".to_string())));
+        assert_eq!(only_a.len(), 1); // edit a (seed has no parent → empty files_changed)
+
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[test]
+    fn get_history_limit_caps_results() {
+        let vault = temp_vault();
+        std::fs::create_dir_all(&vault).expect("create temp vault");
+        for i in 0..5 {
+            std::fs::write(vault.join("note.md"), format!("v{i}")).expect("write");
+            auto_commit(&vault, &format!("commit {i}")).expect("commit");
+        }
+
+        let limited = get_history(&vault, None, Some(2)).expect("limited history");
+        assert_eq!(limited.len(), 2);
+
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[test]
+    fn get_commit_diff_returns_patch() {
+        let vault = temp_vault();
+        std::fs::create_dir_all(&vault).expect("create temp vault");
+        std::fs::write(vault.join("note.md"), "line one\n").expect("write v1");
+        auto_commit(&vault, "v1").expect("commit v1");
+
+        std::fs::write(vault.join("note.md"), "line one\nline two\n").expect("write v2");
+        auto_commit(&vault, "v2").expect("commit v2");
+
+        let history = get_history(&vault, None, Some(1)).expect("history");
+        let latest = history.first().expect("latest");
+
+        let diff = get_commit_diff(&vault, &latest.id).expect("diff");
+        assert_eq!(diff.id, latest.id);
+        assert!(diff.files_changed.contains(&"note.md".to_string()));
+        assert!(diff.patch.contains("+line two"));
 
         let _ = std::fs::remove_dir_all(vault);
     }

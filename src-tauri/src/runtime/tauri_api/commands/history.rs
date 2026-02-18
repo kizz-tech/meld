@@ -6,7 +6,7 @@ pub async fn get_history() -> Result<Vec<HistoryEntry>, String> {
     let settings = Settings::load_global();
     let vault_path = settings.vault_path.as_ref().ok_or("No vault configured")?;
 
-    match crate::adapters::git::get_history(std::path::Path::new(vault_path)) {
+    match crate::adapters::git::get_history(std::path::Path::new(vault_path), None, None) {
         Ok(entries) => Ok(entries),
         Err(_) => Ok(Vec::new()), // No git repo yet — return empty history
     }
