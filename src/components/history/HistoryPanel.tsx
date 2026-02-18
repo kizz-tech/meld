@@ -7,6 +7,15 @@ import { getHistory, revertCommit, type HistoryEntry } from "@/lib/tauri";
 export default function HistoryPanel() {
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!error) return;
+    const timeoutId = window.setTimeout(() => {
+      setError(null);
+    }, 3600);
+    return () => window.clearTimeout(timeoutId);
+  }, [error]);
 
   async function loadHistory() {
     try {
@@ -29,6 +38,7 @@ export default function HistoryPanel() {
       await loadHistory();
     } catch (e) {
       console.error("Failed to revert:", e);
+      setError(`Failed to revert: ${String(e)}`);
     }
   }
 
@@ -45,6 +55,12 @@ export default function HistoryPanel() {
           </svg>
         </button>
       </div>
+
+      {error && (
+        <div className="rounded-md border border-error/40 bg-error/[0.08] px-3 py-2 text-sm text-error">
+          {error}
+        </div>
+      )}
 
       {loading ? (
         <div className="flex justify-center py-8">
