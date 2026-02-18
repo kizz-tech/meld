@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="app-icon.png" width="80" height="80" alt="meld icon" />
+  <img src="app-icon.svg" width="80" height="80" alt="meld icon" />
 </p>
 
 <h1 align="center">meld</h1>
