@@ -25,6 +25,7 @@ pub fn run() {
             commands::conversations::send_message,
             commands::conversations::regenerate_last_response,
             commands::conversations::edit_user_message,
+            commands::conversations::export_conversation,
             commands::settings::get_config,
             commands::settings::get_provider_catalog,
             commands::settings::set_api_key,

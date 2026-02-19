@@ -43,6 +43,7 @@ function IconButton({ title, onClick, children }: IconButtonProps) {
     <button
       type="button"
       title={title}
+      aria-label={title}
       onClick={onClick}
       className="flex h-7 w-7 items-center justify-center rounded-md text-text-muted/80 transition-colors duration-[120ms] hover:text-text outline-none"
     >

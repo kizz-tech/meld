@@ -245,6 +245,18 @@ export async function cancelActiveRun(
   return invoke<boolean>("cancel_active_run", { conversationId });
 }
 
+export async function exportConversation(
+  conversationId: string,
+  filePath: string,
+  title?: string,
+): Promise<void> {
+  return invoke("export_conversation", {
+    conversationId,
+    filePath,
+    title: title ?? null,
+  });
+}
+
 /* ── Chat / Agent ──────────────────────────────────────── */
 
 export async function sendMessage(

@@ -341,3 +341,32 @@ pub async fn edit_user_message(
         conversation_id: conversation_id.to_string(),
     })
 }
+
+#[tauri::command]
+pub async fn export_conversation(
+    conversation_id: String,
+    file_path: String,
+    title: Option<String>,
+) -> Result<(), String> {
+    let parsed_id = parse_conversation_id(&conversation_id)?;
+    let settings = Settings::load_global();
+    let db_path = current_db_path(&settings)?;
+    let db = crate::adapters::vectordb::VectorDb::open(&db_path).map_err(|e| e.to_string())?;
+    let messages = db
+        .get_conversation_messages(parsed_id)
+        .map_err(|e| e.to_string())?;
+
+    let heading = title.unwrap_or_else(|| "Conversation".to_string());
+    let mut md = format!("# {heading}\n\n");
+
+    for msg in &messages {
+        let role_label = match msg.role.as_str() {
+            "user" => "**User**",
+            "assistant" => "**Assistant**",
+            other => other,
+        };
+        md.push_str(&format!("{role_label}\n\n{}\n\n---\n\n", msg.content));
+    }
+
+    std::fs::write(&file_path, md).map_err(|e| e.to_string())
+}

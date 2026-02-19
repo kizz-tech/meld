@@ -9,7 +9,9 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useShallow } from "zustand/react/shallow";
+import { save } from "@tauri-apps/plugin-dialog";
 import { useAppStore, type Conversation } from "@/lib/store";
+import { exportConversation } from "@/lib/tauri";
 import type { VaultEntry } from "@/lib/tauri";
 import VaultBrowser from "@/components/vault/VaultBrowser";
 import TreeSurface from "@/components/tree/TreeSurface";
@@ -1077,6 +1079,26 @@ export default function Sidebar({
                 >
                   <span>Rename</span>
                   <span>✎</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const conv = selectedMenuConversation;
+                    setContextMenu(null);
+                    void (async () => {
+                      const filePath = await save({
+                        defaultPath: `${conv.title || "conversation"}.md`,
+                        filters: [{ name: "Markdown", extensions: ["md"] }],
+                      });
+                      if (filePath) {
+                        await exportConversation(conv.id, filePath, conv.title);
+                      }
+                    })();
+                  }}
+                  className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
+                >
+                  <span>Export</span>
+                  <span>↗</span>
                 </button>
                 {selectedMenuConversation.archived ? (
                   <>

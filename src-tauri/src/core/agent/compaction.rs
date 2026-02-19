@@ -163,7 +163,7 @@ async fn pre_compaction_flush(
     tool_ctx: &ToolExecutionContext<'_>,
     summary: &str,
 ) -> Value {
-    let path = "context-compaction-flush";
+    let path = ".meld/context-compaction-flush";
     let ts = now_iso();
     let read_result = tools
         .execute("kb_read", json!({ "path": path }), tool_ctx)
