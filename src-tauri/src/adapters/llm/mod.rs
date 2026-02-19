@@ -175,6 +175,7 @@ async fn run_chat_with_retries(
     messages: &[ChatMessage],
     tools: Option<&[ToolDefinition]>,
     tx: &mpsc::UnboundedSender<StreamEvent>,
+    thinking_budget: Option<u32>,
 ) -> Result<(), String> {
     let retry_delays_secs = [1_u64, 2_u64, 4_u64];
     let max_attempts = retry_delays_secs.len() + 1;
@@ -188,6 +189,7 @@ async fn run_chat_with_retries(
                 messages,
                 tools,
                 tx: tx.clone(),
+                thinking_budget,
             })
             .await;
 
@@ -227,6 +229,7 @@ pub async fn chat_stream(
     messages: &[ChatMessage],
     tools: Option<&[ToolDefinition]>,
     tx: mpsc::UnboundedSender<StreamEvent>,
+    thinking_budget: Option<u32>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let model_id = if model.contains(':') {
         model.to_string()
@@ -262,6 +265,7 @@ pub async fn chat_stream(
         messages,
         tools,
         &tx,
+        thinking_budget,
     )
     .await
     {
@@ -320,6 +324,7 @@ pub async fn chat_stream(
                             messages,
                             tools,
                             &tx,
+                            thinking_budget,
                         )
                         .await
                         .map_err(|fallback_error| {
@@ -365,6 +370,7 @@ impl LlmPort for ChatLlmAdapter {
                 request.messages,
                 request.tools,
                 request.tx,
+                request.thinking_budget,
             )
             .await
         })

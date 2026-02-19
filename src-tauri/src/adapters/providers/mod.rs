@@ -13,6 +13,7 @@ pub struct ChatRequest<'a> {
     pub messages: &'a [ChatMessage],
     pub tools: Option<&'a [ToolDefinition]>,
     pub tx: mpsc::UnboundedSender<StreamEvent>,
+    pub thinking_budget: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -264,6 +265,7 @@ impl LlmProvider for OpenAiLlmProvider {
                 request.messages,
                 request.tools,
                 request.tx,
+                request.thinking_budget,
             )
             .await
         })
@@ -304,6 +306,7 @@ impl LlmProvider for OpenRouterLlmProvider {
                 request.tx,
                 "https://openrouter.ai/api/v1/chat/completions",
                 "OpenRouter",
+                request.thinking_budget,
             )
             .await
         })
@@ -344,6 +347,7 @@ impl LlmProvider for OllamaLlmProvider {
                 request.tx,
                 "http://localhost:11434/v1/chat/completions",
                 "Ollama",
+                request.thinking_budget,
             )
             .await
         })
@@ -365,6 +369,7 @@ impl LlmProvider for LmStudioLlmProvider {
                 request.tx,
                 "http://localhost:1234/v1/chat/completions",
                 "LM Studio",
+                request.thinking_budget,
             )
             .await
         })

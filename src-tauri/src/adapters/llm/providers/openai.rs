@@ -48,11 +48,13 @@ struct OpenAIMessage {
 struct OpenAIReasoningConfig {
     effort: String,
     summary: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_tokens: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
 struct OpenRouterReasoningConfig {
-    effort: String,
+    max_tokens: u32,
 }
 
 #[derive(Debug, Serialize)]
@@ -75,6 +77,7 @@ pub async fn chat_stream(
     messages: &[ChatMessage],
     tools: Option<&[ToolDefinition]>,
     tx: mpsc::UnboundedSender<StreamEvent>,
+    thinking_budget: Option<u32>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let client = reqwest::Client::new();
     let endpoint = "https://api.openai.com/v1/responses";
@@ -97,7 +100,7 @@ pub async fn chat_stream(
         },
         tools: build_responses_tools(tools),
         stream: true,
-        reasoning: build_openai_reasoning_config(model),
+        reasoning: build_openai_reasoning_config(model, thinking_budget),
     };
 
     let response = client
@@ -177,6 +180,7 @@ pub async fn chat_stream(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn chat_stream_with_endpoint(
     api_key: &str,
     model: &str,
@@ -185,6 +189,7 @@ pub async fn chat_stream_with_endpoint(
     tx: mpsc::UnboundedSender<StreamEvent>,
     endpoint: &str,
     provider_name: &str,
+    thinking_budget: Option<u32>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let client = reqwest::Client::new();
 
@@ -206,7 +211,7 @@ pub async fn chat_stream_with_endpoint(
             },
             reasoning: if provider_name == "OpenRouter" {
                 Some(OpenRouterReasoningConfig {
-                    effort: "medium".to_string(),
+                    max_tokens: thinking_budget.unwrap_or(2048),
                 })
             } else {
                 None
@@ -445,7 +450,10 @@ fn build_responses_input(messages: &[ChatMessage]) -> Vec<Value> {
     input
 }
 
-fn build_openai_reasoning_config(model: &str) -> Option<OpenAIReasoningConfig> {
+fn build_openai_reasoning_config(
+    model: &str,
+    thinking_budget: Option<u32>,
+) -> Option<OpenAIReasoningConfig> {
     if !is_reasoning_model(model) {
         return None;
     }
@@ -453,6 +461,7 @@ fn build_openai_reasoning_config(model: &str) -> Option<OpenAIReasoningConfig> {
     Some(OpenAIReasoningConfig {
         effort: "medium".to_string(),
         summary: "auto".to_string(),
+        max_tokens: Some(thinking_budget.unwrap_or(2048)),
     })
 }
 

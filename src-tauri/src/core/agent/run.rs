@@ -4,7 +4,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
-use crate::adapters::llm::TokenUsage;
+use crate::adapters::llm::{TokenUsage, ToolCall};
 use crate::core::ports::emitter::EmitterPort;
 use crate::core::ports::llm::{ChatMessage, DynError, LlmChatRequest, RecoveryEvent, StreamEvent};
 use crate::core::ports::store::StorePort;
@@ -36,6 +36,9 @@ pub struct RunRequest<'a> {
     pub embedding_key: &'a str,
     pub embedding_model_id: &'a str,
     pub tavily_api_key: &'a str,
+    pub search_provider: &'a str,
+    pub searxng_base_url: &'a str,
+    pub brave_api_key: &'a str,
     pub note_count: usize,
     pub indexed_files: usize,
     pub indexed_chunks: usize,
@@ -112,7 +115,194 @@ fn append_thinking_chunk(buffer: &mut String, chunk: &str) {
     buffer.push_str(chunk);
 }
 
+fn is_write_tool(name: &str) -> bool {
+    matches!(name, "kb_create" | "kb_update")
+}
+
+struct ToolExecOutcome {
+    index: usize,
+    tool_call_id: String,
+    tool_name: String,
+    result_str: String,
+    is_write: bool,
+    verify_failed: bool,
+    tool_ok: bool,
+    invalid_args: bool,
+}
+
 impl Agent {
+    async fn execute_one_tool(
+        &self,
+        tc: &ToolCall,
+        index: usize,
+        iteration: usize,
+        run_id: &str,
+        tool_ctx: &ToolExecutionContext<'_>,
+    ) -> ToolExecOutcome {
+        let is_write = is_write_tool(&tc.function.name);
+        let args: Value =
+            serde_json::from_str(&tc.function.arguments).unwrap_or_else(|_| json!({}));
+
+        let tool_calling_payload = emit_run_state(
+            self.emitter.as_ref(),
+            run_id,
+            AgentState::ToolCalling,
+            iteration,
+            Some(&tc.function.name),
+        );
+        append_run_event_ledger(
+            self.store.as_ref(),
+            run_id,
+            iteration,
+            "lifecycle",
+            "agent:run_state",
+            &tool_calling_payload,
+        );
+
+        let tool_start_payload = json!({
+            "run_id": run_id,
+            "id": tc.id,
+            "iteration": iteration,
+            "tool": tc.function.name,
+            "args": args,
+            "ts": now_iso(),
+        });
+        self.emitter.emit("agent:tool_start", &tool_start_payload);
+        append_run_event_ledger(
+            self.store.as_ref(),
+            run_id,
+            iteration,
+            "tool",
+            "agent:tool_start",
+            &tool_start_payload,
+        );
+
+        emit_timeline_step(
+            self.emitter.as_ref(),
+            run_id,
+            iteration,
+            "tool_start",
+            Some(&tc.function.name),
+            args_preview(&args),
+            None,
+            None,
+        );
+
+        let result = self
+            .tools
+            .execute(&tc.function.name, args.clone(), tool_ctx)
+            .await;
+        let result_str = serde_json::to_string(&result).unwrap_or_else(|_| {
+            json!({
+                "ok": false,
+                "action": "mcp.serialization",
+                "error": {
+                    "code": "serialize_failed",
+                    "message": "Failed to serialize MCP tool result",
+                    "retriable": false
+                }
+            })
+            .to_string()
+        });
+
+        let verify_failed =
+            result.pointer("/error/code").and_then(|v| v.as_str()) == Some("verify_mismatch");
+        let tool_ok = result.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+        let invalid_args = !tool_ok
+            && result.pointer("/error/code").and_then(|v| v.as_str()) == Some("invalid_arguments");
+
+        let tool_result_payload = json!({
+            "run_id": run_id,
+            "id": tc.id,
+            "iteration": iteration,
+            "tool": tc.function.name,
+            "result": result_str
+        });
+        self.emitter.emit("agent:tool_result", &tool_result_payload);
+        let tool_result_ledger_payload = json!({
+            "run_id": run_id,
+            "id": tc.id,
+            "iteration": iteration,
+            "tool": tc.function.name,
+            "result": result
+        });
+        append_run_event_ledger(
+            self.store.as_ref(),
+            run_id,
+            iteration,
+            "tool",
+            "agent:tool_result",
+            &tool_result_ledger_payload,
+        );
+
+        emit_timeline_step(
+            self.emitter.as_ref(),
+            run_id,
+            iteration,
+            "tool_result",
+            Some(&tc.function.name),
+            None,
+            Some(extract_result_preview(
+                &tool_result_ledger_payload["result"],
+            )),
+            extract_file_changes(&tool_result_ledger_payload["result"]),
+        );
+
+        let verifying_payload = emit_run_state(
+            self.emitter.as_ref(),
+            run_id,
+            AgentState::Verifying,
+            iteration,
+            Some(&tc.function.name),
+        );
+        append_run_event_ledger(
+            self.store.as_ref(),
+            run_id,
+            iteration,
+            "lifecycle",
+            "agent:run_state",
+            &verifying_payload,
+        );
+
+        let verification_event = build_verification_event(
+            run_id,
+            iteration,
+            &tc.function.name,
+            &tool_result_ledger_payload["result"],
+        );
+        self.emitter.emit("agent:verification", &verification_event);
+        append_run_event_ledger(
+            self.store.as_ref(),
+            run_id,
+            iteration,
+            "verification",
+            "agent:verification",
+            &verification_event,
+        );
+
+        emit_timeline_step(
+            self.emitter.as_ref(),
+            run_id,
+            iteration,
+            "verify",
+            Some(&tc.function.name),
+            None,
+            Some(build_verify_summary(&tool_result_ledger_payload["result"])),
+            extract_file_changes(&tool_result_ledger_payload["result"]),
+        );
+
+        ToolExecOutcome {
+            index,
+            tool_call_id: tc.id.clone(),
+            tool_name: tc.function.name.clone(),
+            result_str,
+            is_write,
+            verify_failed,
+            tool_ok,
+            invalid_args,
+        }
+    }
+
     pub async fn run(&self, request: RunRequest<'_>) -> Result<RunResult, DynError> {
         let run_id = uuid::Uuid::new_v4().to_string();
         let run_budget = request.budget.clone();
@@ -221,6 +411,9 @@ impl Agent {
             embedding_key: request.embedding_key,
             embedding_model_id: request.embedding_model_id,
             tavily_api_key: request.tavily_api_key,
+            search_provider: request.search_provider,
+            searxng_base_url: request.searxng_base_url,
+            brave_api_key: request.brave_api_key,
         };
 
         for iteration in 0..run_budget.max_iterations as usize {
@@ -299,6 +492,7 @@ impl Agent {
             let tools_clone = tools.clone();
             let llm = self.llm.clone();
 
+            let thinking_budget = if iteration == 0 { Some(4096) } else { Some(1024) };
             let llm_handle = tokio::spawn(async move {
                 llm.chat_stream(LlmChatRequest {
                     api_key: &api_key_for_llm,
@@ -307,6 +501,7 @@ impl Agent {
                     messages: &msgs,
                     tools: Some(&tools_clone),
                     tx,
+                    thinking_budget,
                 })
                 .await
             });
@@ -662,215 +857,94 @@ impl Agent {
                 },
             });
 
+            // Budget check once before batch
+            if let Some(reason) = budget_timeout_reason(
+                &run_budget,
+                run_started,
+                iteration,
+                total_tool_calls,
+                &messages,
+            ) {
+                emit_timeline_step(
+                    self.emitter.as_ref(),
+                    &run_id,
+                    iteration,
+                    "done",
+                    None,
+                    None,
+                    Some(format!("Agent timed out: {reason}")),
+                    None,
+                );
+                timeline_steps += 1;
+                emit_timeline_done(self.emitter.as_ref(), &run_id, iteration, timeline_steps);
+                let result = emit_state_and_finish(
+                    self.emitter.as_ref(),
+                    self.store.as_ref(),
+                    &run_id,
+                    iteration,
+                    AgentState::Timeout,
+                    Some(&reason),
+                    total_tool_calls,
+                    total_write_calls,
+                    verify_failures,
+                    run_started,
+                    &total_token_usage,
+                );
+                return Ok(result);
+            }
+
+            // Partition into reads (parallel) and writes (sequential)
+            let (reads, writes): (Vec<_>, Vec<_>) = tool_calls
+                .iter()
+                .enumerate()
+                .partition(|(_, tc)| !is_write_tool(&tc.function.name));
+
+            // Parallel reads via join_all (no 'static needed — borrows &self, &tool_ctx)
+            let read_futures = reads
+                .iter()
+                .map(|(idx, tc)| self.execute_one_tool(tc, *idx, iteration, &run_id, &tool_ctx));
+            let read_outcomes = futures::future::join_all(read_futures).await;
+
+            // Sequential writes
+            let mut write_outcomes = Vec::new();
+            for (idx, tc) in &writes {
+                let outcome = self
+                    .execute_one_tool(tc, *idx, iteration, &run_id, &tool_ctx)
+                    .await;
+                write_outcomes.push(outcome);
+            }
+
+            // Merge, sort by original index, update counters, append messages
+            let mut all_outcomes: Vec<ToolExecOutcome> =
+                read_outcomes.into_iter().chain(write_outcomes).collect();
+            all_outcomes.sort_by_key(|o| o.index);
+
             let mut invalid_argument_tools: HashSet<String> = HashSet::new();
             let mut failed_tool_calls = 0usize;
-            for tc in &tool_calls {
-                if let Some(reason) = budget_timeout_reason(
-                    &run_budget,
-                    run_started,
-                    iteration,
-                    total_tool_calls,
-                    &messages,
-                ) {
-                    emit_timeline_step(
-                        self.emitter.as_ref(),
-                        &run_id,
-                        iteration,
-                        "done",
-                        None,
-                        None,
-                        Some(format!("Agent timed out: {reason}")),
-                        None,
-                    );
-                    timeline_steps += 1;
-                    emit_timeline_done(self.emitter.as_ref(), &run_id, iteration, timeline_steps);
-                    let result = emit_state_and_finish(
-                        self.emitter.as_ref(),
-                        self.store.as_ref(),
-                        &run_id,
-                        iteration,
-                        AgentState::Timeout,
-                        Some(&reason),
-                        total_tool_calls,
-                        total_write_calls,
-                        verify_failures,
-                        run_started,
-                        &total_token_usage,
-                    );
-                    return Ok(result);
-                }
 
+            for outcome in &all_outcomes {
                 total_tool_calls += 1;
-                if matches!(tc.function.name.as_str(), "kb_create" | "kb_update") {
+                if outcome.is_write {
                     total_write_calls += 1;
                 }
-                let args: Value =
-                    serde_json::from_str(&tc.function.arguments).unwrap_or_else(|_| json!({}));
-
-                let tool_calling_payload = emit_run_state(
-                    self.emitter.as_ref(),
-                    &run_id,
-                    AgentState::ToolCalling,
-                    iteration,
-                    Some(&tc.function.name),
-                );
-                append_run_event_ledger(
-                    self.store.as_ref(),
-                    &run_id,
-                    iteration,
-                    "lifecycle",
-                    "agent:run_state",
-                    &tool_calling_payload,
-                );
-
-                let tool_start_payload = json!({
-                    "run_id": run_id,
-                    "id": tc.id,
-                    "iteration": iteration,
-                    "tool": tc.function.name,
-                    "args": args,
-                    "ts": now_iso(),
-                });
-                self.emitter.emit("agent:tool_start", &tool_start_payload);
-                append_run_event_ledger(
-                    self.store.as_ref(),
-                    &run_id,
-                    iteration,
-                    "tool",
-                    "agent:tool_start",
-                    &tool_start_payload,
-                );
-
-                emit_timeline_step(
-                    self.emitter.as_ref(),
-                    &run_id,
-                    iteration,
-                    "tool_start",
-                    Some(&tc.function.name),
-                    args_preview(&args),
-                    None,
-                    None,
-                );
-                timeline_steps += 1;
-
-                let result = self
-                    .tools
-                    .execute(&tc.function.name, args.clone(), &tool_ctx)
-                    .await;
-                let result_str = serde_json::to_string(&result).unwrap_or_else(|_| {
-                    json!({
-                        "ok": false,
-                        "action": "mcp.serialization",
-                        "error": {
-                            "code": "serialize_failed",
-                            "message": "Failed to serialize MCP tool result",
-                            "retriable": false
-                        }
-                    })
-                    .to_string()
-                });
-                if result.pointer("/error/code").and_then(|v| v.as_str()) == Some("verify_mismatch")
-                {
+                if outcome.verify_failed {
                     verify_failures += 1;
                 }
-                let tool_ok = result.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
-                if !tool_ok {
+                if !outcome.tool_ok {
                     failed_tool_calls += 1;
-                    if result.pointer("/error/code").and_then(|v| v.as_str())
-                        == Some("invalid_arguments")
-                    {
-                        invalid_argument_tools.insert(tc.function.name.clone());
+                    if outcome.invalid_args {
+                        invalid_argument_tools.insert(outcome.tool_name.clone());
                     }
                 }
-
-                let tool_result_payload = json!({
-                    "run_id": run_id,
-                    "id": tc.id,
-                    "iteration": iteration,
-                    "tool": tc.function.name,
-                    "result": result_str
-                });
-                self.emitter.emit("agent:tool_result", &tool_result_payload);
-                let tool_result_ledger_payload = json!({
-                    "run_id": run_id,
-                    "id": tc.id,
-                    "iteration": iteration,
-                    "tool": tc.function.name,
-                    "result": result
-                });
-                append_run_event_ledger(
-                    self.store.as_ref(),
-                    &run_id,
-                    iteration,
-                    "tool",
-                    "agent:tool_result",
-                    &tool_result_ledger_payload,
-                );
-
-                emit_timeline_step(
-                    self.emitter.as_ref(),
-                    &run_id,
-                    iteration,
-                    "tool_result",
-                    Some(&tc.function.name),
-                    None,
-                    Some(extract_result_preview(
-                        &tool_result_ledger_payload["result"],
-                    )),
-                    extract_file_changes(&tool_result_ledger_payload["result"]),
-                );
-                timeline_steps += 1;
-
-                let verifying_payload = emit_run_state(
-                    self.emitter.as_ref(),
-                    &run_id,
-                    AgentState::Verifying,
-                    iteration,
-                    Some(&tc.function.name),
-                );
-                append_run_event_ledger(
-                    self.store.as_ref(),
-                    &run_id,
-                    iteration,
-                    "lifecycle",
-                    "agent:run_state",
-                    &verifying_payload,
-                );
-
-                let verification_event = build_verification_event(
-                    &run_id,
-                    iteration,
-                    &tc.function.name,
-                    &tool_result_ledger_payload["result"],
-                );
-                self.emitter.emit("agent:verification", &verification_event);
-                append_run_event_ledger(
-                    self.store.as_ref(),
-                    &run_id,
-                    iteration,
-                    "verification",
-                    "agent:verification",
-                    &verification_event,
-                );
-
-                emit_timeline_step(
-                    self.emitter.as_ref(),
-                    &run_id,
-                    iteration,
-                    "verify",
-                    Some(&tc.function.name),
-                    None,
-                    Some(build_verify_summary(&tool_result_ledger_payload["result"])),
-                    extract_file_changes(&tool_result_ledger_payload["result"]),
-                );
-                timeline_steps += 1;
+                // 3 timeline steps per tool: tool_start, tool_result, verify
+                timeline_steps += 3;
 
                 messages.push(ChatMessage {
                     role: "tool".to_string(),
-                    content: result_str,
+                    content: outcome.result_str.clone(),
                     tool_calls: None,
-                    tool_call_id: Some(tc.id.clone()),
-                    tool_name: Some(tc.function.name.clone()),
+                    tool_call_id: Some(outcome.tool_call_id.clone()),
+                    tool_name: Some(outcome.tool_name.clone()),
                     thought_signatures: None,
                 });
             }

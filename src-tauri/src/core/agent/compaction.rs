@@ -142,6 +142,7 @@ async fn summarize_messages_for_compaction(
             messages: &summary_prompt,
             tools: None,
             tx,
+            thinking_budget: None,
         })
         .await
         .is_err()

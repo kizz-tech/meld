@@ -13,6 +13,8 @@ pub struct LlmChatRequest<'a> {
     pub messages: &'a [ChatMessage],
     pub tools: Option<&'a [ToolDefinition]>,
     pub tx: mpsc::UnboundedSender<StreamEvent>,
+    /// Per-turn thinking budget for reasoning models. None = provider default.
+    pub thinking_budget: Option<u32>,
 }
 
 pub trait LlmPort: Send + Sync {

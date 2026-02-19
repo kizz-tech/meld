@@ -7,15 +7,10 @@ mod rerank;
 
 pub struct RagContext {
     pub chunks: Vec<ChunkResult>,
-    #[allow(dead_code)]
     pub context_text: String,
-    #[allow(dead_code)]
     pub hyde_used: bool,
-    #[allow(dead_code)]
     pub rerank_applied: bool,
-    #[allow(dead_code)]
     pub rerank_reason: String,
-    #[allow(dead_code)]
     pub candidate_count: usize,
 }
 
@@ -91,6 +86,7 @@ async fn generate_hyde_document(query: &str) -> Option<String> {
             &messages_clone,
             None,
             tx,
+            None,
         )
         .await
     });
@@ -128,6 +124,7 @@ pub async fn query(
     embedding_model_id: &str,
     query: &str,
     limit: usize,
+    chunk_count: usize,
 ) -> Result<RagContext, Box<dyn std::error::Error + Send + Sync>> {
     let settings = crate::adapters::config::Settings::load_global();
     let rerank_enabled = settings.retrieval_rerank_enabled();
@@ -143,8 +140,12 @@ pub async fn query(
 
     let mut hyde_used = false;
     let mut retrieval_embedding = query_embedding.clone();
-    if should_use_hyde(query) {
-        if let Some(hyde_document) = generate_hyde_document(query).await {
+    let skip_hyde = chunk_count < 100;
+    if !skip_hyde && should_use_hyde(query) {
+        let hyde_result =
+            tokio::time::timeout(std::time::Duration::from_secs(8), generate_hyde_document(query))
+                .await;
+        if let Ok(Some(hyde_document)) = hyde_result {
             if let Ok(hyde_embedding) = crate::adapters::embeddings::get_embedding(
                 api_key,
                 embedding_model_id,
