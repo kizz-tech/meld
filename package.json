@@ -23,7 +23,9 @@
   "dependencies": {
     "@tauri-apps/api": "^2.10.0",
     "@tauri-apps/plugin-dialog": "^2.6.0",
+    "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-shell": "^2.3.0",
+    "@tauri-apps/plugin-updater": "^2.10.0",
     "gray-matter": "^4.0.3",
     "next": "^16.0.0",
     "react": "^19.1.0",

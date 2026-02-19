@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { check, type Update } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { useAppStore } from "@/lib/store";
 import ComboSelect, { type ComboOption } from "@/components/ui/ComboSelect";
 import {
@@ -64,6 +66,53 @@ export default function SettingsPanel() {
   const [embeddingModelId, setEmbeddingModelIdLocal] = useState("");
   const [userLanguage, setUserLanguageLocal] = useState("");
   const [reindexError, setReindexError] = useState<string | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<
+    "idle" | "checking" | "available" | "downloading" | "upToDate" | "error"
+  >("idle");
+  const [updateInfo, setUpdateInfo] = useState<Update | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
+
+  const handleCheckUpdate = useCallback(async () => {
+    setUpdateStatus("checking");
+    setUpdateError(null);
+    try {
+      const update = await check();
+      if (update) {
+        setUpdateInfo(update);
+        setUpdateStatus("available");
+      } else {
+        setUpdateStatus("upToDate");
+      }
+    } catch (e) {
+      setUpdateError(e instanceof Error ? e.message : String(e));
+      setUpdateStatus("error");
+    }
+  }, []);
+
+  const handleInstallUpdate = useCallback(async () => {
+    if (!updateInfo) return;
+    setUpdateStatus("downloading");
+    setDownloadProgress(0);
+    try {
+      let totalBytes = 0;
+      let downloadedBytes = 0;
+      await updateInfo.downloadAndInstall((event) => {
+        if (event.event === "Started" && event.data.contentLength) {
+          totalBytes = event.data.contentLength;
+        } else if (event.event === "Progress") {
+          downloadedBytes += event.data.chunkLength;
+          if (totalBytes > 0) {
+            setDownloadProgress(Math.round((downloadedBytes / totalBytes) * 100));
+          }
+        }
+      });
+      await relaunch();
+    } catch (e) {
+      setUpdateError(e instanceof Error ? e.message : String(e));
+      setUpdateStatus("error");
+    }
+  }, [updateInfo]);
 
   useEffect(() => {
     getConfig().then((config) => {
@@ -316,6 +365,56 @@ export default function SettingsPanel() {
         ))}
 
         {saved && <p className="text-xs text-success">Saved</p>}
+      </section>
+
+      {/* Updates */}
+      <section className="space-y-2">
+        <h3 className="text-sm font-medium text-text-secondary">Updates</h3>
+        <div className="flex items-center gap-2">
+          {updateStatus === "idle" && (
+            <button
+              onClick={handleCheckUpdate}
+              className="text-xs px-3 py-1.5 bg-bg-tertiary/80 rounded-lg hover:bg-border transition-colors"
+            >
+              Check for updates
+            </button>
+          )}
+          {updateStatus === "checking" && (
+            <p className="text-xs text-text-muted">Checking for updates...</p>
+          )}
+          {updateStatus === "upToDate" && (
+            <p className="text-xs text-text-muted">You&apos;re on the latest version.</p>
+          )}
+          {updateStatus === "available" && updateInfo && (
+            <div className="space-y-1">
+              <p className="text-xs text-text">
+                Update available: <span className="font-medium">{updateInfo.version}</span>
+              </p>
+              <button
+                onClick={handleInstallUpdate}
+                className="text-xs px-3 py-1.5 bg-bg-tertiary/80 rounded-lg hover:bg-border transition-colors"
+              >
+                Download &amp; install
+              </button>
+            </div>
+          )}
+          {updateStatus === "downloading" && (
+            <p className="text-xs text-text-muted">
+              Downloading...{downloadProgress !== null ? ` ${downloadProgress}%` : ""}
+            </p>
+          )}
+          {updateStatus === "error" && (
+            <div className="space-y-1">
+              <p className="text-xs text-error">{updateError}</p>
+              <button
+                onClick={handleCheckUpdate}
+                className="text-xs px-3 py-1.5 bg-bg-tertiary/80 rounded-lg hover:bg-border transition-colors"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+        </div>
       </section>
     </div>
   );
