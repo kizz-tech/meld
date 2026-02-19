@@ -763,22 +763,26 @@ export default function VaultBrowser({
     },
     dragEnd: resetDragState,
     fileDragOver: (event, filePath) => {
-      const targetFolder = parentPath(filePath);
-      const sourcePath = draggingPathRef.current || "";
-      const normalizedSource = normalizeRelativePath(sourcePath);
-      if (!normalizedSource || !canDropInto(normalizedSource, targetFolder)) return;
+      if (!draggingPathRef.current) return;
       event.preventDefault();
       event.stopPropagation();
-      setDropTarget(null);
+      const targetFolder = parentPath(filePath);
+      const normalizedSource = normalizeRelativePath(draggingPathRef.current);
+      if (normalizedSource && canDropInto(normalizedSource, targetFolder)) {
+        setDropTarget(targetFolder);
+      }
     },
     folderDragOver: (event, folderPath) => {
-      const sourcePath = draggingPathRef.current || "";
-      const normalizedSource = normalizeRelativePath(sourcePath);
-      if (!normalizedSource || !canDropInto(normalizedSource, folderPath)) return;
+      if (!draggingPathRef.current) return;
       event.preventDefault();
-      setDropTarget(folderPath);
+      event.stopPropagation();
+      const normalizedSource = normalizeRelativePath(draggingPathRef.current);
+      if (normalizedSource && canDropInto(normalizedSource, folderPath)) {
+        setDropTarget(folderPath);
+      }
     },
-    folderDragLeave: (folderPath) => {
+    folderDragLeave: (event, folderPath) => {
+      event.stopPropagation();
       if (dropTarget === folderPath) setDropTarget(null);
     },
     fileDrop: (event, filePath) => handleDropMove(event, parentPath(filePath)),
@@ -820,6 +824,7 @@ export default function VaultBrowser({
         name={node.name}
         depth={depth}
         isActive={normalizedActiveNote === node.path}
+        isDrop={false}
         isEditing={editingPath === node.path}
         isPinned={pinnedPaths.has(node.path)}
         draftName={draftName}
@@ -844,16 +849,18 @@ export default function VaultBrowser({
           openContextMenu(event, { kind: "root", path: null })
         }
         onRootDragOver={(event) => {
-          const sourcePath =
-            event.dataTransfer.getData("application/x-meld-entry-path") ||
-            event.dataTransfer.getData("text/plain") ||
-            draggingPathRef.current ||
-            draggingPath ||
-            "";
-          const normalizedSource = normalizeRelativePath(sourcePath);
-          if (!normalizedSource || !canDropInto(normalizedSource, "")) return;
+          if (!draggingPathRef.current) return;
           event.preventDefault();
-          setDropTarget(null);
+          const normalizedSource = normalizeRelativePath(draggingPathRef.current);
+          if (normalizedSource && canDropInto(normalizedSource, "")) {
+            setDropTarget("");
+          }
+        }}
+        onRootDragLeave={(event) => {
+          if (event.currentTarget !== event.target) return;
+          if (dropTarget === "") {
+            setDropTarget(null);
+          }
         }}
         onRootDrop={(event) => handleDropMove(event, "")}
       >

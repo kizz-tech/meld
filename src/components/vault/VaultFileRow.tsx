@@ -21,6 +21,7 @@ export interface VaultFileRowProps {
   name: string;
   depth: number;
   isActive: boolean;
+  isDrop: boolean;
   isEditing: boolean;
   isPinned: boolean;
   draftName: string;
@@ -34,6 +35,8 @@ const kbRowIdleClass =
   "text-text-secondary hover:bg-bg-tertiary/50 hover:text-text";
 const kbRowActiveClass =
   "bg-accent/[0.06] text-accent";
+const kbRowDropClass =
+  "bg-bg-tertiary/70 text-text";
 
 const PinIcon = () => (
   <Pin className="h-3.5 w-3.5 shrink-0 text-accent/80" strokeWidth={1.8} aria-hidden="true" />
@@ -45,6 +48,7 @@ const VaultFileRow = memo(
     name,
     depth,
     isActive,
+    isDrop,
     isEditing,
     isPinned,
     draftName,
@@ -87,7 +91,7 @@ const VaultFileRow = memo(
             onDragEnd={() => handlers.current.dragEnd()}
             onDragOver={(event) => handlers.current.fileDragOver(event, path)}
             onDrop={(event) => handlers.current.fileDrop(event, path)}
-            className={`${kbRowBaseClass} ${isActive ? kbRowActiveClass : kbRowIdleClass}`}
+            className={`${kbRowBaseClass} ${isDrop ? kbRowDropClass : isActive ? kbRowActiveClass : kbRowIdleClass}`}
             style={{ paddingLeft: `${8 + depth * 12}px` }}
             title={path}
           >
@@ -113,6 +117,7 @@ const VaultFileRow = memo(
       prev.name === next.name &&
       prev.depth === next.depth &&
       prev.isActive === next.isActive &&
+      prev.isDrop === next.isDrop &&
       prev.isPinned === next.isPinned
     );
   },

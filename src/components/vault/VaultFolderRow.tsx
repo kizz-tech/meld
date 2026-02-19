@@ -10,7 +10,7 @@ export interface VaultFolderHandlers {
   dragStart: (event: React.DragEvent<HTMLElement>, path: string) => void;
   dragEnd: () => void;
   folderDragOver: (event: React.DragEvent<HTMLElement>, folderPath: string) => void;
-  folderDragLeave: (folderPath: string) => void;
+  folderDragLeave: (event: React.DragEvent<HTMLElement>, folderPath: string) => void;
   folderDrop: (event: React.DragEvent<HTMLElement>, folderPath: string) => void;
   draftChange: (value: string) => void;
   submitRename: (path: string) => void;
@@ -92,7 +92,7 @@ const VaultFolderRow = memo(
             onDragStart={(event) => handlers.current.dragStart(event, path)}
             onDragEnd={() => handlers.current.dragEnd()}
             onDragOver={(event) => handlers.current.folderDragOver(event, path)}
-            onDragLeave={() => handlers.current.folderDragLeave(path)}
+            onDragLeave={(event) => handlers.current.folderDragLeave(event, path)}
             onDrop={(event) => handlers.current.folderDrop(event, path)}
             className={`${kbRowBaseClass} ${isDrop ? kbRowDropClass : kbRowIdleClass}`}
             style={{ paddingLeft: `${8 + depth * 12}px` }}

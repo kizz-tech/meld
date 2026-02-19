@@ -293,6 +293,7 @@ export default function Sidebar({
   const [pendingFolderForNewChat, setPendingFolderForNewChat] = useState<string | null>(
     null,
   );
+  const chatLayoutLoadedRef = useRef(false);
 
   const [editingConversationId, setEditingConversationId] = useState<
     Conversation["id"] | null
@@ -325,9 +326,11 @@ export default function Sidebar({
       });
       return next;
     });
+    chatLayoutLoadedRef.current = true;
   }, []);
 
   useEffect(() => {
+    if (!chatLayoutLoadedRef.current) return;
     saveChatLayoutSnapshot({
       folders: chatFolders,
       assignments: conversationFolders,
@@ -906,17 +909,18 @@ export default function Sidebar({
     conversationDragOver: (event, _conversationId, parentFolderId) => {
       const entity = resolveDraggingEntity(event);
       if (!entity) return;
+      event.preventDefault();
+      event.stopPropagation();
       const shouldDropToRoot = parentFolderId === null;
       const canDrop = shouldDropToRoot
         ? canDropToRoot(entity)
         : canDropIntoFolder(entity, parentFolderId);
-      if (!canDrop) return;
-      event.preventDefault();
-      event.stopPropagation();
-      if (shouldDropToRoot) {
-        setDropTarget({ kind: "root" });
-      } else {
-        setDropTarget({ kind: "folder", folderId: parentFolderId });
+      if (canDrop) {
+        setDropTarget(
+          shouldDropToRoot
+            ? { kind: "root" }
+            : { kind: "folder", folderId: parentFolderId },
+        );
       }
     },
     conversationDrop: (event, _conversationId, parentFolderId) => {
@@ -943,10 +947,12 @@ export default function Sidebar({
     },
     folderDragOver: (event, folderId) => {
       const entity = resolveDraggingEntity(event);
-      if (!canDropIntoFolder(entity, folderId)) return;
+      if (!entity) return;
       event.preventDefault();
       event.stopPropagation();
-      setDropTarget({ kind: "folder", folderId });
+      if (canDropIntoFolder(entity, folderId)) {
+        setDropTarget({ kind: "folder", folderId });
+      }
     },
     folderDragLeave: (folderId) => {
       if (dropTarget?.kind === "folder" && dropTarget.folderId === folderId) {
@@ -1358,9 +1364,11 @@ export default function Sidebar({
                     }}
                     onRootDragOver={(event) => {
                       const entity = resolveDraggingEntity(event);
-                      if (!canDropToRoot(entity)) return;
+                      if (!entity) return;
                       event.preventDefault();
-                      setDropTarget({ kind: "root" });
+                      if (canDropToRoot(entity)) {
+                        setDropTarget({ kind: "root" });
+                      }
                     }}
                     onRootDragLeave={(event) => {
                       if (event.currentTarget !== event.target) return;
