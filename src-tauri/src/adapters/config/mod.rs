@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 /// Bump this when adding new fields with non-trivial defaults.
 /// When a loaded config has a lower version, it is re-saved to disk
 /// so that users see the new keys in their `config.toml`.
-const CURRENT_CONFIG_VERSION: u32 = 1;
+const CURRENT_CONFIG_VERSION: u32 = 2;
 
 fn default_retrieval_rerank_enabled() -> bool {
     true
@@ -53,6 +53,8 @@ pub struct Settings {
     pub retrieval_rerank_enabled: bool,
     #[serde(default = "default_retrieval_rerank_top_k")]
     pub retrieval_rerank_top_k: u32,
+    pub search_provider: Option<String>,
+    pub searxng_base_url: Option<String>,
     pub openai_api_key: Option<String>,
     pub anthropic_api_key: Option<String>,
     pub google_api_key: Option<String>,
@@ -70,6 +72,8 @@ pub struct VaultConfig {
     pub retrieval_rerank_enabled: Option<bool>,
     pub retrieval_rerank_top_k: Option<u32>,
     pub user_language: Option<String>,
+    pub search_provider: Option<String>,
+    pub searxng_base_url: Option<String>,
 }
 
 impl VaultConfig {
@@ -102,6 +106,8 @@ impl Default for Settings {
             oauth_tokens: HashMap::new(),
             retrieval_rerank_enabled: default_retrieval_rerank_enabled(),
             retrieval_rerank_top_k: default_retrieval_rerank_top_k(),
+            search_provider: None,
+            searxng_base_url: None,
             openai_api_key: None,
             anthropic_api_key: None,
             google_api_key: None,
@@ -196,6 +202,12 @@ impl Settings {
         }
         if let Some(ref v) = vc.user_language {
             merged.user_language = Some(v.clone());
+        }
+        if let Some(ref v) = vc.search_provider {
+            merged.search_provider = Some(v.clone());
+        }
+        if let Some(ref v) = vc.searxng_base_url {
+            merged.searxng_base_url = Some(v.clone());
         }
         merged
     }
@@ -408,6 +420,42 @@ impl Settings {
 
     pub fn tavily_api_key(&self) -> String {
         self.tavily_api_key.clone().unwrap_or_default()
+    }
+
+    pub fn search_provider(&self) -> String {
+        self.search_provider
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .unwrap_or("tavily")
+            .to_string()
+    }
+
+    pub fn searxng_base_url(&self) -> String {
+        self.searxng_base_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .unwrap_or("http://localhost:8080")
+            .to_string()
+    }
+
+    pub fn set_search_provider(&mut self, provider: &str) {
+        let normalized = provider.trim().to_ascii_lowercase();
+        if normalized.is_empty() {
+            self.search_provider = None;
+        } else {
+            self.search_provider = Some(normalized);
+        }
+    }
+
+    pub fn set_searxng_base_url(&mut self, url: &str) {
+        let normalized = url.trim().to_string();
+        if normalized.is_empty() {
+            self.searxng_base_url = None;
+        } else {
+            self.searxng_base_url = Some(normalized);
+        }
     }
 
     pub fn fallback_chat_model_id(&self) -> Option<String> {

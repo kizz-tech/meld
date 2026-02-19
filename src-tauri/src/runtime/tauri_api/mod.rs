@@ -40,6 +40,8 @@ pub fn run() {
             commands::settings::set_embedding_model,
             commands::settings::set_fallback_model,
             commands::settings::set_user_language,
+            commands::settings::set_search_provider,
+            commands::settings::set_searxng_base_url,
             commands::history::get_history,
             commands::history::revert_commit,
             commands::history::open_file_external,

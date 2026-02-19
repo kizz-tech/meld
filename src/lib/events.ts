@@ -1,5 +1,5 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { useAppStore, type ToolResultEvent } from "./store";
+import { useAppStore, type AppState, type ToolResultEvent } from "./store";
 
 let unlisteners: UnlistenFn[] = [];
 let activeSetup: Promise<void> | null = null;
@@ -188,16 +188,20 @@ async function doSetupEventListeners() {
   unlisteners.push(
     await listen<unknown>("chat:done", (event) => {
       const state = useAppStore.getState();
+      const resetState = {
+        streamingContent: "",
+        isStreaming: false,
+        agentActivity: null as AppState["agentActivity"],
+        latestThinkingSummary: null as string | null,
+        thinkingLog: [] as AppState["thinkingLog"],
+        toolCallLog: [] as AppState["toolCallLog"],
+        toolResultsLog: [] as AppState["toolResultsLog"],
+        timelineSteps: [] as AppState["timelineSteps"],
+        streamSuppressed: false,
+      };
+
       if (state.streamSuppressed) {
-        state.clearStreamingContent();
-        state.setStreaming(false);
-        state.setAgentActivity(null);
-        state.setLatestThinkingSummary(null);
-        state.clearThinkingLog();
-        state.clearToolCallLog();
-        state.clearToolResultLog();
-        state.clearTimeline();
-        state.setStreamSuppressed(false);
+        useAppStore.setState(resetState);
         return;
       }
       const payload = parseChatDonePayload(event.payload);
@@ -231,9 +235,9 @@ async function doSetupEventListeners() {
           state.latestThinkingSummary ||
           undefined;
 
-        state.addMessage({
+        const newMessage = {
           id: crypto.randomUUID(),
-          role: "assistant",
+          role: "assistant" as const,
           content: finalContent,
           timestamp: parseTimestamp(payload.timestamp),
           runId,
@@ -245,64 +249,63 @@ async function doSetupEventListeners() {
             state.toolCallLog.length > 0 ? [...state.toolCallLog] : undefined,
           timelineSteps:
             state.timelineSteps.length > 0 ? [...state.timelineSteps] : undefined,
-        });
+        };
+
+        useAppStore.setState((s) => ({
+          messages: [...s.messages, newMessage],
+          ...resetState,
+        }));
+      } else {
+        useAppStore.setState(resetState);
       }
-      state.clearStreamingContent();
-      state.setStreaming(false);
-      state.setAgentActivity(null);
-      state.setLatestThinkingSummary(null);
-      state.clearThinkingLog();
-      state.clearToolCallLog();
-      state.clearToolResultLog();
-      state.clearTimeline();
-      state.setStreamSuppressed(false);
     }),
   );
 
   unlisteners.push(
     await listen<string>("chat:error", (event) => {
       const state = useAppStore.getState();
+      const resetState = {
+        streamingContent: "",
+        isStreaming: false,
+        agentActivity: null as AppState["agentActivity"],
+        latestThinkingSummary: null as string | null,
+        thinkingLog: [] as AppState["thinkingLog"],
+        toolCallLog: [] as AppState["toolCallLog"],
+        toolResultsLog: [] as AppState["toolResultsLog"],
+        timelineSteps: [] as AppState["timelineSteps"],
+        streamSuppressed: false,
+      };
+
       if (state.streamSuppressed) {
-        state.clearStreamingContent();
-        state.setStreaming(false);
-        state.setAgentActivity(null);
-        state.setLatestThinkingSummary(null);
-        state.clearThinkingLog();
-        state.clearToolCallLog();
-        state.clearToolResultLog();
-        state.clearTimeline();
-        state.setStreamSuppressed(false);
+        useAppStore.setState(resetState);
         return;
       }
-      state.addMessage({
+
+      const errorMessage = {
         id: crypto.randomUUID(),
-        role: "assistant",
+        role: "assistant" as const,
         content: `Error: ${event.payload}`,
-      });
-      state.clearStreamingContent();
-      state.setStreaming(false);
-      state.setAgentActivity(null);
-      state.setLatestThinkingSummary(null);
-      state.clearThinkingLog();
-      state.clearToolCallLog();
-      state.clearToolResultLog();
-      state.clearTimeline();
-      state.setStreamSuppressed(false);
+      };
+      useAppStore.setState((s) => ({
+        messages: [...s.messages, errorMessage],
+        ...resetState,
+      }));
     }),
   );
 
   unlisteners.push(
     await listen("chat:cancelled", () => {
-      const state = useAppStore.getState();
-      state.clearStreamingContent();
-      state.setStreaming(false);
-      state.setAgentActivity(null);
-      state.setLatestThinkingSummary(null);
-      state.clearThinkingLog();
-      state.clearToolCallLog();
-      state.clearToolResultLog();
-      state.clearTimeline();
-      state.setStreamSuppressed(false);
+      useAppStore.setState({
+        streamingContent: "",
+        isStreaming: false,
+        agentActivity: null,
+        latestThinkingSummary: null,
+        thinkingLog: [],
+        toolCallLog: [],
+        toolResultsLog: [],
+        timelineSteps: [],
+        streamSuppressed: false,
+      });
     }),
   );
 

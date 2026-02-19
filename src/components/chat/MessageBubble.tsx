@@ -20,6 +20,7 @@ import {
   FilePlus,
   FilePen,
   Globe,
+  List,
   Circle,
   ChevronDown,
   Pencil,
@@ -377,6 +378,8 @@ function TimelineRowIcon({ row }: { row: UnifiedTimelineRow }) {
       return <Search className={`${cls} text-text-muted`} strokeWidth={1.5} />;
     case "kb_read":
       return <FileText className={`${cls} text-text-muted`} strokeWidth={1.5} />;
+    case "kb_list":
+      return <List className={`${cls} text-text-muted`} strokeWidth={1.5} />;
     case "kb_create":
       return <FilePlus className={`${cls} text-success/70`} strokeWidth={1.5} />;
     case "kb_update":

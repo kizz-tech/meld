@@ -185,6 +185,11 @@ export interface AppState {
   setEmbeddingProvider: (provider: string) => void;
 }
 
+/* ── Streaming batch buffer ────────────────────────────── */
+
+let pendingChunks = "";
+let flushScheduled = false;
+
 /* ── Store ─────────────────────────────────────────────── */
 
 export const useAppStore = create<AppState>((set) => ({
@@ -297,8 +302,18 @@ export const useAppStore = create<AppState>((set) => ({
     }),
   setStreaming: (v) => set({ isStreaming: v }),
   setStreamSuppressed: (v) => set({ streamSuppressed: v }),
-  appendStreamingContent: (chunk) =>
-    set((s) => ({ streamingContent: s.streamingContent + chunk })),
+  appendStreamingContent: (chunk) => {
+    pendingChunks += chunk;
+    if (!flushScheduled) {
+      flushScheduled = true;
+      requestAnimationFrame(() => {
+        const flushed = pendingChunks;
+        pendingChunks = "";
+        flushScheduled = false;
+        set((s) => ({ streamingContent: s.streamingContent + flushed }));
+      });
+    }
+  },
   clearStreamingContent: () => set({ streamingContent: "" }),
 
   // Agent

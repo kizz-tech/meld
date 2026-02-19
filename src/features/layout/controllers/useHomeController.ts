@@ -328,12 +328,28 @@ export function useHomeController() {
       if (s.showSettings) s.toggleSettings();
       if (s.showHistory) s.toggleHistory();
 
+      // Suppress streaming events from the previous conversation so chat:done
+      // handler just resets state instead of building a message from stale data.
+      // chat:done will reset streamSuppressed back to false.
+      useAppStore.setState({
+        streamingContent: "",
+        isStreaming: false,
+        streamSuppressed: true,
+        agentActivity: null,
+        latestThinkingSummary: null,
+        thinkingLog: [],
+        toolCallLog: [],
+        toolResultsLog: [],
+        timelineSteps: [],
+      });
+
       setActiveConversation(conversationId);
       try {
         const result = await getConversationMessages(conversationId);
         setMessages(result.map((message) => normalizeMessage(message)));
       } catch (error) {
         console.error("Failed to load conversation messages:", error);
+        useAppStore.getState().showToast("Failed to load messages");
         setMessages([]);
       }
     },

@@ -64,6 +64,8 @@ export interface Config {
   oauth_tokens: Record<string, unknown>;
   retrieval_rerank_enabled: boolean;
   retrieval_rerank_top_k: number;
+  search_provider: string | null;
+  searxng_base_url: string | null;
   openai_api_key: string | null;
   anthropic_api_key: string | null;
   google_api_key: string | null;
@@ -382,6 +384,14 @@ export async function setFallbackModel(
 
 export async function setUserLanguage(language: string): Promise<void> {
   return invoke("set_user_language", { language });
+}
+
+export async function setSearchProvider(provider: string): Promise<void> {
+  return invoke("set_search_provider", { provider });
+}
+
+export async function setSearxngBaseUrl(url: string): Promise<void> {
+  return invoke("set_searxng_base_url", { url });
 }
 
 /* ── History ───────────────────────────────────────────── */

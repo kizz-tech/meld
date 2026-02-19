@@ -150,3 +150,24 @@ pub async fn set_user_language(language: String) -> Result<(), String> {
     settings.set_user_language(&language);
     settings.save().map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub async fn set_search_provider(provider: String) -> Result<(), String> {
+    let normalized = provider.trim().to_ascii_lowercase();
+    if !matches!(normalized.as_str(), "tavily" | "searxng" | "brave") {
+        return Err(format!(
+            "Unsupported search provider '{}'. Supported: tavily, searxng, brave",
+            provider
+        ));
+    }
+    let mut settings = Settings::load_global();
+    settings.set_search_provider(&normalized);
+    settings.save().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn set_searxng_base_url(url: String) -> Result<(), String> {
+    let mut settings = Settings::load_global();
+    settings.set_searxng_base_url(&url);
+    settings.save().map_err(|e| e.to_string())
+}

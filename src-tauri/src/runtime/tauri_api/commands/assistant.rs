@@ -260,7 +260,14 @@ async fn execute_assistant_run(
             .unwrap_or_default();
     let embedding_model_id = settings.embedding_model_id();
     let tavily_api_key = settings.tavily_api_key();
-    let has_web_search = !tavily_api_key.is_empty();
+    let search_provider = settings.search_provider();
+    let searxng_base_url = settings.searxng_base_url();
+    let brave_api_key = settings.api_key_for_provider("brave").unwrap_or_default();
+    let has_web_search = match search_provider.as_str() {
+        "searxng" => true,
+        "brave" => !brave_api_key.is_empty(),
+        _ => !tavily_api_key.is_empty(),
+    };
 
     let tool_registry = crate::adapters::mcp::ToolRegistry::new(has_web_search);
     let tool_prompt_lines = ToolPort::prompt_tool_lines(&tool_registry);
@@ -300,6 +307,9 @@ async fn execute_assistant_run(
             embedding_key: &embedding_key,
             embedding_model_id: &embedding_model_id,
             tavily_api_key: &tavily_api_key,
+            search_provider: &search_provider,
+            searxng_base_url: &searxng_base_url,
+            brave_api_key: &brave_api_key,
             note_count,
             indexed_files: indexed_files.max(0) as usize,
             indexed_chunks: indexed_chunks.max(0) as usize,
@@ -358,7 +368,12 @@ async fn execute_assistant_run(
 
             match persist_result {
                 Ok(_) => {
-                    if let Err(error) = app.emit("chat:done", ()) {
+                    let done_payload = serde_json::json!({
+                        "content": assistant_content,
+                        "sources": sources,
+                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                    });
+                    if let Err(error) = app.emit("chat:done", done_payload) {
                         log::warn!("failed to emit chat:done: {}", error);
                     }
                     Ok(())

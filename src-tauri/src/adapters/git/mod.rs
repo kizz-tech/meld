@@ -198,10 +198,18 @@ pub fn auto_commit_files(
                 return Ok(()); // Nothing to commit
             }
 
-            repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent_commit])?;
+            let oid =
+                repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent_commit])?;
+            log::debug!(
+                "git auto-commit: oid={}, files={}, message={}",
+                oid,
+                files.len(),
+                message
+            );
         }
         None => {
-            repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[])?;
+            let oid = repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[])?;
+            log::debug!("git initial commit: oid={}, message={}", oid, message);
         }
     }
 

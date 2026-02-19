@@ -26,8 +26,15 @@ pub async fn get_embedding(
 #[allow(dead_code)]
 pub fn embedding_dimensions(model_id: &str) -> usize {
     let registry = crate::adapters::providers::ProviderRegistry::default();
-    registry
-        .resolve_embedding(model_id)
-        .map(|(provider, _)| provider.dimensions())
-        .unwrap_or(1536)
+    match registry.resolve_embedding(model_id) {
+        Ok((provider, _)) => provider.dimensions(),
+        Err(e) => {
+            log::warn!(
+                "Failed to resolve embedding model '{}': {}. Falling back to 1536 dimensions.",
+                model_id,
+                e
+            );
+            1536
+        }
+    }
 }

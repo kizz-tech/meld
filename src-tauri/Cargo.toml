@@ -1,6 +1,6 @@
 [package]
 name = "meld"
-version = "0.2.0"
+version = "0.3.0"
 description = "Superpersonalized AI agent with a shared knowledge base"
 authors = ["kizz-tech"]
 license = "AGPL-3.0"
@@ -42,6 +42,7 @@ log = "0.4"
 env_logger = "0.11"
 futures = "0.3"
 tokio-stream = "0.1"
+urlencoding = "2"
 open = "5"
 dirs = "6"
 notify-debouncer-full = "0.7"

@@ -58,6 +58,17 @@ pub const DEFAULT_MELD_HINTS_TEMPLATE: &str = r#"# Navigation
 - If one user message contains multiple independent ideas, split into separate notes (one idea = one note).
 - If user says "record this" or "save this", use recent conversation context directly; do not ask "what should I record?".
 - Don't search before every action. "5+5" doesn't need kb_search.
+
+# Web Research
+- "Deep research" or "in-depth" = at least 3 web searches from different angles (broad → narrow → adjacent).
+- One search query = one perspective. Vary keywords, language, and specificity.
+- Multiple independent sources > single blog post. Marketing claims need validation.
+- Distinguish vendor blogs (biased) from research/journalism (neutral). Don't present marketing claims as verified facts.
+
+# Update vs Create
+- User says "expand", "improve", "add to", "update" → kb_update existing note, NOT kb_create new.
+- Before kb_create, kb_search for similar titles. If a note covers the same topic, use kb_update.
+- Never create a note whose name is a subset/superset of an existing note (e.g. "X in 2026" exists → don't create "X based on AI in 2026").
 "#;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -269,8 +280,35 @@ pub fn read_note_verification(
     })
 }
 
+fn ensure_within_vault(vault_path: &Path, full_path: &Path) -> Result<(), std::io::Error> {
+    let canonical_vault = vault_path.canonicalize().unwrap_or_else(|_| vault_path.to_path_buf());
+    // For paths that don't exist yet, canonicalize the parent
+    let canonical_target = if full_path.exists() {
+        full_path.canonicalize()?
+    } else if let Some(parent) = full_path.parent() {
+        let canonical_parent = parent
+            .canonicalize()
+            .unwrap_or_else(|_| parent.to_path_buf());
+        canonical_parent.join(full_path.file_name().unwrap_or_default())
+    } else {
+        full_path.to_path_buf()
+    };
+    if !canonical_target.starts_with(&canonical_vault) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "Path escapes vault boundary: {}",
+                full_path.display()
+            ),
+        ));
+    }
+    Ok(())
+}
+
 pub fn read_note(vault_path: &Path, relative_path: &str) -> Result<String, std::io::Error> {
-    std::fs::read_to_string(vault_path.join(relative_path))
+    let full_path = vault_path.join(relative_path);
+    ensure_within_vault(vault_path, &full_path)?;
+    std::fs::read_to_string(full_path)
 }
 
 pub fn write_note(
@@ -282,6 +320,7 @@ pub fn write_note(
     if let Some(parent) = full_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
+    ensure_within_vault(vault_path, &full_path)?;
     std::fs::write(full_path, content)
 }
 
@@ -361,6 +400,8 @@ mod tests {
         assert!(DEFAULT_AGENTS_MD_TEMPLATE.contains("## Communication"));
         assert!(DEFAULT_MELD_HINTS_TEMPLATE.contains("# Navigation"));
         assert!(DEFAULT_MELD_HINTS_TEMPLATE.contains("# Tools"));
+        assert!(DEFAULT_MELD_HINTS_TEMPLATE.contains("# Web Research"));
+        assert!(DEFAULT_MELD_HINTS_TEMPLATE.contains("# Update vs Create"));
     }
 
     #[test]

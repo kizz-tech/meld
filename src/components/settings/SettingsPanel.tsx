@@ -15,6 +15,8 @@ import {
   setEmbeddingModel,
   setFallbackModel,
   setUserLanguage,
+  setSearchProvider,
+  setSearxngBaseUrl,
   reindex,
   selectVault,
   openDevtools,
@@ -76,6 +78,8 @@ export default function SettingsPanel() {
   const [embeddingProvider, setEmbeddingProviderLocal] = useState("");
   const [embeddingModelId, setEmbeddingModelIdLocal] = useState("");
   const [userLanguage, setUserLanguageLocal] = useState("");
+  const [searchProviderLocal, setSearchProviderLocal] = useState("tavily");
+  const [searxngUrlLocal, setSearxngUrlLocal] = useState("http://localhost:8080");
   const [reindexError, setReindexError] = useState<string | null>(null);
   const [updateStatus, setUpdateStatus] = useState<
     "idle" | "checking" | "available" | "downloading" | "upToDate" | "error"
@@ -144,6 +148,8 @@ export default function SettingsPanel() {
       if (config.fallback_chat_model_id)
         setFallbackModelIdLocal(config.fallback_chat_model_id);
       if (config.user_language) setUserLanguageLocal(config.user_language);
+      if (config.search_provider) setSearchProviderLocal(config.search_provider);
+      if (config.searxng_base_url) setSearxngUrlLocal(config.searxng_base_url);
 
       const keys: Record<string, string> = {};
       if (config.openai_api_key) keys.openai = config.openai_api_key;
@@ -358,14 +364,59 @@ export default function SettingsPanel() {
         />
       </section>
 
+      {/* Web Search */}
+      <section className="space-y-3">
+        <h3 className="text-sm font-medium text-text-secondary">Web Search</h3>
+        <ComboSelect
+          value={searchProviderLocal}
+          options={[
+            { value: "tavily", label: "Tavily", badge: "1k free/mo" },
+            { value: "searxng", label: "SearXNG", badge: "self-hosted" },
+            { value: "brave", label: "Brave Search", badge: "cloud" },
+          ]}
+          placeholder="Select search provider..."
+          onChange={(v) => {
+            setSearchProviderLocal(v);
+            setSearchProvider(v);
+          }}
+          allowCustom={false}
+        />
+        {searchProviderLocal === "searxng" && (
+          <div className="space-y-1">
+            <label className="text-xs text-text-muted">SearXNG URL</label>
+            <input
+              type="text"
+              value={searxngUrlLocal}
+              onChange={(e) => setSearxngUrlLocal(e.target.value)}
+              onBlur={() => setSearxngBaseUrl(searxngUrlLocal.trim())}
+              placeholder="http://localhost:8080"
+              className="w-full p-2 text-sm bg-white/[0.03] border border-border/50 rounded-xl text-text placeholder:text-text-muted focus:outline-none focus:border-border-focus focus:bg-bg focus:shadow-[0_0_0_1px_var(--color-border-focus)]"
+            />
+            <p className="text-[11px] text-text-muted/70">
+              Run locally: docker run -p 8080:8080 searxng/searxng
+            </p>
+          </div>
+        )}
+        {searchProviderLocal === "tavily" && (
+          <p className="text-[11px] text-text-muted/70">
+            Requires Tavily API key below. Free tier: 1,000 searches/month.
+          </p>
+        )}
+        {searchProviderLocal === "brave" && (
+          <p className="text-[11px] text-text-muted/70">
+            Requires Brave API key below. Sign up at brave.com/search/api
+          </p>
+        )}
+      </section>
+
       {/* API Keys */}
       <section className="space-y-3">
         <h3 className="text-sm font-medium text-text-secondary">API Keys</h3>
 
-        {["openai", "anthropic", "google", "openrouter", "tavily"].map((provider) => (
+        {["openai", "anthropic", "google", "openrouter", "tavily", "brave"].map((provider) => (
           <div key={provider} className="space-y-1">
             <label className="text-xs text-text-muted capitalize">
-              {provider === "openrouter" ? "OpenRouter" : provider}
+              {provider === "openrouter" ? "OpenRouter" : provider === "brave" ? "Brave Search" : provider}
             </label>
             <div className="flex gap-1">
               <input
@@ -386,7 +437,9 @@ export default function SettingsPanel() {
                         ? "AIza..."
                         : provider === "openrouter"
                           ? "sk-or-..."
-                          : "tvly-..."
+                          : provider === "brave"
+                            ? "BSA..."
+                            : "tvly-..."
                 }
                 className="flex-1 p-2 text-sm bg-white/[0.03] border border-border/50 rounded-xl text-text placeholder:text-text-muted focus:outline-none focus:border-border-focus focus:bg-bg focus:shadow-[0_0_0_1px_var(--color-border-focus)]"
               />

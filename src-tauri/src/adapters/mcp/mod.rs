@@ -29,6 +29,9 @@ pub struct ToolContext<'a> {
     pub embedding_key: &'a str,
     pub embedding_model_id: &'a str,
     pub tavily_api_key: &'a str,
+    pub search_provider: &'a str,
+    pub searxng_base_url: &'a str,
+    pub brave_api_key: &'a str,
 }
 
 pub type McpContext<'a> = ToolContext<'a>;
@@ -143,6 +146,9 @@ impl ToolPort for ToolRegistry {
                 embedding_key: ctx.embedding_key,
                 embedding_model_id: ctx.embedding_model_id,
                 tavily_api_key: ctx.tavily_api_key,
+                search_provider: ctx.search_provider,
+                searxng_base_url: ctx.searxng_base_url,
+                brave_api_key: ctx.brave_api_key,
             };
             ToolRegistry::execute(self, name, args, &port_ctx).await
         })
@@ -154,12 +160,18 @@ fn enforce_registry_write_verification(definition: &ToolDefinition, result: Valu
         return result;
     }
 
+    // If the result already indicates failure, pass through without additional verification
+    if result.get("ok").and_then(|v| v.as_bool()) == Some(false) {
+        return result;
+    }
+
     let readback_ok = result
         .get("proof")
         .and_then(|v| v.get("readback_ok"))
         .and_then(|v| v.as_bool());
 
-    if readback_ok != Some(false) {
+    // Require explicit readback_ok == true for write operations
+    if readback_ok == Some(true) {
         return result;
     }
 
@@ -465,7 +477,7 @@ impl WebSearchTool {
         let description = if has_web_search {
             "Use only for fresh external facts when vault evidence is insufficient or stale. Do not use when the vault already contains enough evidence. Errors: invalid_arguments, request_failed/parse_failed (retriable). Edge cases: external results can be noisy; prefer short quotes plus URLs."
         } else {
-            "Use only for fresh external facts when vault evidence is insufficient or stale. Unavailable until Tavily API key is configured (not_configured). Do not use when vault context is enough. Edge cases: if unavailable, continue with vault-only reasoning."
+            "Use only for fresh external facts when vault evidence is insufficient or stale. Unavailable until a web search provider is configured in Settings (not_configured). Do not use when vault context is enough. Edge cases: if unavailable, continue with vault-only reasoning."
         };
 
         Self {
@@ -1291,12 +1303,22 @@ async fn execute_kb_search(
         .and_then(|value| value.as_u64())
         .unwrap_or(10) as usize;
 
+    let db_path_owned = ctx.db_path.to_path_buf();
+    let chunk_count = tokio::task::spawn_blocking(move || {
+        crate::adapters::vectordb::VectorDb::open(&db_path_owned)
+            .and_then(|db| db.index_stats().map(|(_, chunks)| chunks as usize))
+            .unwrap_or(0)
+    })
+    .await
+    .unwrap_or(0);
+
     let results = match crate::adapters::rag::query(
         ctx.db_path,
         ctx.embedding_key,
         ctx.embedding_model_id,
         query,
         limit,
+        chunk_count,
     )
     .await
     {
@@ -1376,6 +1398,19 @@ async fn execute_web_search(
         }
     };
 
+    match ctx.search_provider {
+        "searxng" => execute_web_search_searxng(ctx, query, trace_id, started).await,
+        "brave" => execute_web_search_brave(ctx, query, trace_id, started).await,
+        _ => execute_web_search_tavily(ctx, query, trace_id, started).await,
+    }
+}
+
+async fn execute_web_search_tavily(
+    ctx: &McpContext<'_>,
+    query: &str,
+    trace_id: &str,
+    started: Instant,
+) -> Value {
     if ctx.tavily_api_key.is_empty() {
         return error_envelope(
             "web_search",
@@ -1466,6 +1501,196 @@ async fn execute_web_search(
         }
     }
 
+    web_search_success_envelope(query, results, trace_id, started)
+}
+
+async fn execute_web_search_searxng(
+    ctx: &McpContext<'_>,
+    query: &str,
+    trace_id: &str,
+    started: Instant,
+) -> Value {
+    let base_url = ctx.searxng_base_url.trim_end_matches('/');
+    let encoded_query = urlencoding::encode(query);
+    let url = format!("{base_url}/search?q={encoded_query}&format=json");
+
+    let client = reqwest::Client::builder()
+        .user_agent("Meld/0.3.0")
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+    let response: reqwest::Response = match client.get(&url).send().await
+    {
+        Ok(response) => response,
+        Err(error) => {
+            return error_envelope(
+                "web_search",
+                "web.search",
+                None,
+                json!({}),
+                "request_failed",
+                format!("SearXNG request failed: {error}"),
+                true,
+                started,
+                trace_id.to_string(),
+            )
+        }
+    };
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return error_envelope(
+            "web_search",
+            "web.search",
+            None,
+            json!({}),
+            "request_failed",
+            format!("SearXNG error ({status}): {body}"),
+            true,
+            started,
+            trace_id.to_string(),
+        );
+    }
+
+    let data: Value = match response.json().await {
+        Ok(data) => data,
+        Err(error) => {
+            return error_envelope(
+                "web_search",
+                "web.search",
+                None,
+                json!({}),
+                "parse_failed",
+                format!("SearXNG parse error: {error}"),
+                true,
+                started,
+                trace_id.to_string(),
+            )
+        }
+    };
+
+    let mut results = Vec::new();
+    if let Some(items) = data.get("results").and_then(|v| v.as_array()) {
+        for item in items.iter().take(5) {
+            results.push(json!({
+                "type": "result",
+                "title": item.get("title").and_then(|v| v.as_str()).unwrap_or(""),
+                "url": item.get("url").and_then(|v| v.as_str()).unwrap_or(""),
+                "content": item.get("content").and_then(|v| v.as_str()).unwrap_or(""),
+            }));
+        }
+    }
+
+    web_search_success_envelope(query, results, trace_id, started)
+}
+
+async fn execute_web_search_brave(
+    ctx: &McpContext<'_>,
+    query: &str,
+    trace_id: &str,
+    started: Instant,
+) -> Value {
+    if ctx.brave_api_key.is_empty() {
+        return error_envelope(
+            "web_search",
+            "web.search",
+            None,
+            json!({}),
+            "not_configured",
+            "Brave Search not configured. Add a Brave API key in Settings.",
+            false,
+            started,
+            trace_id.to_string(),
+        );
+    }
+
+    let encoded_query = urlencoding::encode(query);
+    let url = format!(
+        "https://api.search.brave.com/res/v1/web/search?q={encoded_query}&count=5"
+    );
+
+    let client = reqwest::Client::new();
+    let response: reqwest::Response = match client
+        .get(&url)
+        .header("X-Subscription-Token", ctx.brave_api_key)
+        .header("Accept", "application/json")
+        .send()
+        .await
+    {
+        Ok(response) => response,
+        Err(error) => {
+            return error_envelope(
+                "web_search",
+                "web.search",
+                None,
+                json!({}),
+                "request_failed",
+                format!("Brave Search request failed: {error}"),
+                true,
+                started,
+                trace_id.to_string(),
+            )
+        }
+    };
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return error_envelope(
+            "web_search",
+            "web.search",
+            None,
+            json!({}),
+            "request_failed",
+            format!("Brave Search error ({status}): {body}"),
+            true,
+            started,
+            trace_id.to_string(),
+        );
+    }
+
+    let data: Value = match response.json().await {
+        Ok(data) => data,
+        Err(error) => {
+            return error_envelope(
+                "web_search",
+                "web.search",
+                None,
+                json!({}),
+                "parse_failed",
+                format!("Brave Search parse error: {error}"),
+                true,
+                started,
+                trace_id.to_string(),
+            )
+        }
+    };
+
+    let mut results = Vec::new();
+    if let Some(web) = data
+        .get("web")
+        .and_then(|v| v.get("results"))
+        .and_then(|v| v.as_array())
+    {
+        for item in web.iter().take(5) {
+            results.push(json!({
+                "type": "result",
+                "title": item.get("title").and_then(|v| v.as_str()).unwrap_or(""),
+                "url": item.get("url").and_then(|v| v.as_str()).unwrap_or(""),
+                "content": item.get("description").and_then(|v| v.as_str()).unwrap_or(""),
+            }));
+        }
+    }
+
+    web_search_success_envelope(query, results, trace_id, started)
+}
+
+fn web_search_success_envelope(
+    query: &str,
+    results: Vec<Value>,
+    trace_id: &str,
+    started: Instant,
+) -> Value {
     envelope(
         "web_search",
         "web.search",
@@ -1514,6 +1739,9 @@ mod tests {
             embedding_key: "",
             embedding_model_id: "openai:text-embedding-3-small",
             tavily_api_key: "",
+            search_provider: "tavily",
+            searxng_base_url: "http://localhost:8080",
+            brave_api_key: "",
         };
 
         let result = execute_tool(
@@ -1558,6 +1786,9 @@ mod tests {
             embedding_key: "",
             embedding_model_id: "openai:text-embedding-3-small",
             tavily_api_key: "",
+            search_provider: "tavily",
+            searxng_base_url: "http://localhost:8080",
+            brave_api_key: "",
         };
 
         let result = execute_tool(
@@ -1606,6 +1837,9 @@ mod tests {
             embedding_key: "",
             embedding_model_id: "openai:text-embedding-3-small",
             tavily_api_key: "",
+            search_provider: "tavily",
+            searxng_base_url: "http://localhost:8080",
+            brave_api_key: "",
         };
 
         let result = execute_tool(
@@ -1661,6 +1895,9 @@ mod tests {
             embedding_key: "",
             embedding_model_id: "openai:text-embedding-3-small",
             tavily_api_key: "",
+            search_provider: "tavily",
+            searxng_base_url: "http://localhost:8080",
+            brave_api_key: "",
         };
 
         let result = execute_tool(
@@ -1735,6 +1972,9 @@ mod tests {
             embedding_key: "",
             embedding_model_id: "openai:text-embedding-3-small",
             tavily_api_key: "",
+            search_provider: "tavily",
+            searxng_base_url: "http://localhost:8080",
+            brave_api_key: "",
         };
 
         let result = execute_tool(
@@ -1796,6 +2036,9 @@ mod tests {
             embedding_key: "",
             embedding_model_id: "openai:text-embedding-3-small",
             tavily_api_key: "",
+            search_provider: "tavily",
+            searxng_base_url: "http://localhost:8080",
+            brave_api_key: "",
         };
 
         let result = execute_tool(&ctx, "search_notes", &json!({ "query": "rust" })).await;
@@ -1825,6 +2068,9 @@ mod tests {
             embedding_key: "",
             embedding_model_id: "openai:text-embedding-3-small",
             tavily_api_key: "",
+            search_provider: "tavily",
+            searxng_base_url: "http://localhost:8080",
+            brave_api_key: "",
         };
 
         trigger_test_corruption_once();
@@ -1884,6 +2130,9 @@ mod tests {
             embedding_key: "",
             embedding_model_id: "openai:text-embedding-3-small",
             tavily_api_key: "",
+            search_provider: "tavily",
+            searxng_base_url: "http://localhost:8080",
+            brave_api_key: "",
         };
 
         let result = execute_tool(
@@ -1920,6 +2169,9 @@ mod tests {
             embedding_key: "",
             embedding_model_id: "openai:text-embedding-3-small",
             tavily_api_key: "",
+            search_provider: "tavily",
+            searxng_base_url: "http://localhost:8080",
+            brave_api_key: "",
         };
 
         let result = execute_tool(
@@ -1959,6 +2211,9 @@ mod tests {
             embedding_key: "",
             embedding_model_id: "openai:text-embedding-3-small",
             tavily_api_key: "",
+            search_provider: "tavily",
+            searxng_base_url: "http://localhost:8080",
+            brave_api_key: "",
         };
 
         let result = execute_tool(&ctx, "kb_history", &json!({})).await;
@@ -1998,6 +2253,9 @@ mod tests {
             embedding_key: "",
             embedding_model_id: "openai:text-embedding-3-small",
             tavily_api_key: "",
+            search_provider: "tavily",
+            searxng_base_url: "http://localhost:8080",
+            brave_api_key: "",
         };
 
         let result = execute_tool(&ctx, "kb_history", &json!({ "path": "a.md" })).await;
@@ -2035,6 +2293,9 @@ mod tests {
             embedding_key: "",
             embedding_model_id: "openai:text-embedding-3-small",
             tavily_api_key: "",
+            search_provider: "tavily",
+            searxng_base_url: "http://localhost:8080",
+            brave_api_key: "",
         };
 
         let result = execute_tool(&ctx, "kb_diff", &json!({ "commit_id": commit_id })).await;
@@ -2063,6 +2324,9 @@ mod tests {
             embedding_key: "",
             embedding_model_id: "openai:text-embedding-3-small",
             tavily_api_key: "",
+            search_provider: "tavily",
+            searxng_base_url: "http://localhost:8080",
+            brave_api_key: "",
         };
 
         let result = execute_tool(&ctx, "kb_diff", &json!({})).await;
@@ -2091,6 +2355,9 @@ mod tests {
             embedding_key: "",
             embedding_model_id: "openai:text-embedding-3-small",
             tavily_api_key: "",
+            search_provider: "tavily",
+            searxng_base_url: "http://localhost:8080",
+            brave_api_key: "",
         };
 
         let result = execute_tool(

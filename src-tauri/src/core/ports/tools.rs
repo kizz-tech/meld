@@ -11,6 +11,9 @@ pub struct ToolExecutionContext<'a> {
     pub embedding_key: &'a str,
     pub embedding_model_id: &'a str,
     pub tavily_api_key: &'a str,
+    pub search_provider: &'a str,
+    pub searxng_base_url: &'a str,
+    pub brave_api_key: &'a str,
 }
 
 pub trait ToolPort: Send + Sync {
