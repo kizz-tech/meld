@@ -435,7 +435,9 @@ mod tests {
         assert_eq!(all.len(), 3);
 
         let only_a = get_history(&vault, Some("a.md"), None).expect("filter a.md");
-        assert!(only_a.iter().all(|e| e.files_changed.contains(&"a.md".to_string())));
+        assert!(only_a
+            .iter()
+            .all(|e| e.files_changed.contains(&"a.md".to_string())));
         assert_eq!(only_a.len(), 1); // edit a (seed has no parent → empty files_changed)
 
         let _ = std::fs::remove_dir_all(vault);

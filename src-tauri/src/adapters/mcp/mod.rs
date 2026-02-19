@@ -1964,8 +1964,14 @@ mod tests {
         let result = execute_tool(&ctx, "kb_history", &json!({})).await;
 
         assert_eq!(result.get("ok").and_then(|v| v.as_bool()), Some(true));
-        assert_eq!(result.get("tool").and_then(|v| v.as_str()), Some("kb_history"));
-        let count = result.pointer("/result/count").and_then(|v| v.as_u64()).unwrap_or(0);
+        assert_eq!(
+            result.get("tool").and_then(|v| v.as_str()),
+            Some("kb_history")
+        );
+        let count = result
+            .pointer("/result/count")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
         assert!(count >= 1);
 
         let _ = std::fs::remove_dir_all(vault);
@@ -2020,8 +2026,7 @@ mod tests {
             .expect("write v2");
         crate::adapters::git::auto_commit(&vault, "v2").expect("commit v2");
 
-        let history =
-            crate::adapters::git::get_history(&vault, None, Some(1)).expect("history");
+        let history = crate::adapters::git::get_history(&vault, None, Some(1)).expect("history");
         let commit_id = &history.first().expect("latest").id;
 
         let ctx = McpContext {
