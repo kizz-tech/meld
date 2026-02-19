@@ -31,7 +31,7 @@ jobs:
 
           BODY="## What's Changed"$'\n\n'
 
-          for TYPE_LABEL in "feat:Features" "fix:Bug Fixes" "docs:Documentation" "refactor:Refactoring" "perf:Performance" "chore:Chores"; do
+          for TYPE_LABEL in "feat:Features" "fix:Bug Fixes" "release:Release" "docs:Documentation" "refactor:Refactoring" "perf:Performance" "chore:Chores"; do
             TYPE="${TYPE_LABEL%%:*}"
             LABEL="${TYPE_LABEL##*:}"
             COMMITS=$(git log "$FROM".."$CURR_TAG" --oneline --no-merges --grep="^${TYPE}" --format="- %s (%h)" 2>/dev/null || true)
@@ -97,3 +97,40 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+  # Upload stable-name copies so /releases/latest/download/ links never break
+  stable-names:
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Download release assets and re-upload with stable names
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          REPO="kizz-tech/meld"
+          mkdir -p assets
+
+          # Download all assets from the draft release
+          gh release download "$TAG" --repo "$REPO" --dir assets
+
+          # Map versioned filenames to stable names
+          for f in assets/*; do
+            base=$(basename "$f")
+            stable=""
+            case "$base" in
+              meld_*_aarch64.dmg)         stable="meld-macos-arm64.dmg" ;;
+              meld_*_x64.dmg)             stable="meld-macos-x64.dmg" ;;
+              meld_aarch64.app.tar.gz)    stable="meld-macos-arm64.app.tar.gz" ;;
+              meld_x64.app.tar.gz)        stable="meld-macos-x64.app.tar.gz" ;;
+              meld_*_x64-setup.exe)       stable="meld-windows-x64-setup.exe" ;;
+              meld_*_x64_en-US.msi)       stable="meld-windows-x64.msi" ;;
+              meld_*_amd64.deb)           stable="meld-linux-amd64.deb" ;;
+              meld_*_amd64.AppImage)      stable="meld-linux-amd64.AppImage" ;;
+              meld-*-1.x86_64.rpm)        stable="meld-linux-x86_64.rpm" ;;
+            esac
+            if [ -n "$stable" ]; then
+              cp "$f" "assets/$stable"
+              gh release upload "$TAG" "assets/$stable" --repo "$REPO" --clobber
+            fi
+          done

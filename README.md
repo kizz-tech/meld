@@ -65,18 +65,47 @@ meld: searches 847 notes → finds [[March Retro]], [[Pricing Research]],
 2. **It knows** — semantic search across your entire vault, grounded in your context
 3. **It acts** — creates notes, connects ideas, builds on what exists
 
-## Install
+## Download
 
-Download the latest release for your platform:
+<div align="left">
+<table>
+  <thead>
+    <tr>
+      <th>OS</th>
+      <th>Download</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>macOS</td>
+      <td>
+        <a href="https://github.com/kizz-tech/meld/releases/latest/download/meld-macos-arm64.dmg"><img src="https://img.shields.io/badge/DMG-Apple_Silicon-000000.svg?logo=apple" alt="macOS ARM64" /></a><br>
+        <a href="https://github.com/kizz-tech/meld/releases/latest/download/meld-macos-x64.dmg"><img src="https://img.shields.io/badge/DMG-Intel-333333.svg?logo=apple" alt="macOS x64" /></a>
+      </td>
+    </tr>
+    <tr>
+      <td>Windows</td>
+      <td>
+        <a href="https://github.com/kizz-tech/meld/releases/latest/download/meld-windows-x64-setup.exe"><img src="https://img.shields.io/badge/Installer-x64-0078D4.svg?logo=windows" alt="Windows Setup" /></a><br>
+        <a href="https://github.com/kizz-tech/meld/releases/latest/download/meld-windows-x64.msi"><img src="https://img.shields.io/badge/MSI-x64-2d7d9a.svg?logo=windows" alt="Windows MSI" /></a>
+      </td>
+    </tr>
+    <tr>
+      <td>Linux</td>
+      <td>
+        <a href="https://github.com/kizz-tech/meld/releases/latest/download/meld-linux-amd64.AppImage"><img src="https://img.shields.io/badge/AppImage-x64-f84e29.svg?logo=linux&logoColor=white" alt="Linux AppImage" /></a><br>
+        <a href="https://github.com/kizz-tech/meld/releases/latest/download/meld-linux-amd64.deb"><img src="https://img.shields.io/badge/DEB-x64-A81D33.svg?logo=debian" alt="Debian/Ubuntu" /></a><br>
+        <a href="https://github.com/kizz-tech/meld/releases/latest/download/meld-linux-x86_64.rpm"><img src="https://img.shields.io/badge/RPM-x64-EE0000.svg?logo=redhat" alt="Fedora/RHEL" /></a>
+      </td>
+    </tr>
+  </tbody>
+</table>
+</div>
 
-**[GitHub Releases](https://github.com/kizz-tech/meld/releases)**
-
-| Platform | Format |
-|----------|--------|
-| Linux | `.AppImage`, `.deb` |
-| macOS (Apple Silicon) | `.dmg` |
-| macOS (Intel) | `.dmg` |
-| Windows | `.msi`, `.exe` |
+> **macOS:** The app is not notarized (no Apple Developer certificate). On first launch macOS may say the app is "damaged". Fix with:
+> ```bash
+> xattr -cr /Applications/meld.app
+> ```
 
 ## Quick Start
 
