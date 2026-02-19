@@ -157,9 +157,14 @@ pub(crate) async fn run_reindex_internal(app: &AppHandle) -> Result<(), String> 
 
     crate::core::agent::set_indexing_active(true);
     let result: Result<(), String> = async {
-        let mut settings = Settings::load_global();
-        let vault_path = settings.vault_path.clone().ok_or("No vault configured")?;
+        let global_settings = Settings::load_global();
+        let vault_path = global_settings
+            .vault_path
+            .clone()
+            .ok_or("No vault configured")?;
         let vault_root = Path::new(&vault_path);
+        let vault_config = crate::adapters::config::VaultConfig::load(vault_root);
+        let mut settings = global_settings.merged_with_vault(&vault_config);
         crate::adapters::vault::ensure_vault_initialized(vault_root).map_err(|e| e.to_string())?;
 
         let files = crate::adapters::vault::list_md_files(vault_root).map_err(|e| e.to_string())?;

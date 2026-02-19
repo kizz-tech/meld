@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn default_retrieval_rerank_enabled() -> bool {
     true
@@ -50,6 +50,31 @@ pub struct Settings {
     pub anthropic_api_key: Option<String>,
     pub google_api_key: Option<String>,
     pub tavily_api_key: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct VaultConfig {
+    pub chat_provider: Option<String>,
+    pub chat_model: Option<String>,
+    pub chat_model_id: Option<String>,
+    pub fallback_chat_model_id: Option<String>,
+    pub embedding_provider: Option<String>,
+    pub embedding_model_id: Option<String>,
+    pub retrieval_rerank_enabled: Option<bool>,
+    pub retrieval_rerank_top_k: Option<u32>,
+    pub user_language: Option<String>,
+}
+
+impl VaultConfig {
+    pub fn load(vault_path: &Path) -> Self {
+        let path = vault_path.join(".meld").join("config.toml");
+        if path.exists() {
+            let content = std::fs::read_to_string(&path).unwrap_or_default();
+            toml::from_str(&content).unwrap_or_default()
+        } else {
+            Self::default()
+        }
+    }
 }
 
 impl Default for Settings {
@@ -117,6 +142,54 @@ impl Settings {
 
     fn global_config_path() -> PathBuf {
         Self::global_config_dir().join("config.toml")
+    }
+
+    pub fn global_rules_path() -> PathBuf {
+        Self::global_config_dir().join("rules")
+    }
+
+    pub fn global_hints_path() -> PathBuf {
+        Self::global_config_dir().join("hints")
+    }
+
+    pub fn global_templates_dir() -> PathBuf {
+        Self::global_config_dir().join("templates")
+    }
+
+    pub fn global_defaults_dir() -> PathBuf {
+        Self::global_config_dir().join("defaults")
+    }
+
+    pub fn merged_with_vault(&self, vc: &VaultConfig) -> Self {
+        let mut merged = self.clone();
+        if let Some(ref v) = vc.chat_provider {
+            merged.chat_provider = Some(v.clone());
+        }
+        if let Some(ref v) = vc.chat_model {
+            merged.chat_model = Some(v.clone());
+        }
+        if let Some(ref v) = vc.chat_model_id {
+            merged.chat_model_id = Some(v.clone());
+        }
+        if let Some(ref v) = vc.fallback_chat_model_id {
+            merged.fallback_chat_model_id = Some(v.clone());
+        }
+        if let Some(ref v) = vc.embedding_provider {
+            merged.embedding_provider = Some(v.clone());
+        }
+        if let Some(ref v) = vc.embedding_model_id {
+            merged.embedding_model_id = Some(v.clone());
+        }
+        if let Some(v) = vc.retrieval_rerank_enabled {
+            merged.retrieval_rerank_enabled = v;
+        }
+        if let Some(v) = vc.retrieval_rerank_top_k {
+            merged.retrieval_rerank_top_k = v;
+        }
+        if let Some(ref v) = vc.user_language {
+            merged.user_language = Some(v.clone());
+        }
+        merged
     }
 
     pub fn load_global() -> Self {
@@ -460,7 +533,7 @@ impl Settings {
 
 #[cfg(test)]
 mod tests {
-    use super::Settings;
+    use super::{Settings, VaultConfig};
 
     #[test]
     fn set_fallback_chat_model_accepts_valid_id() {
@@ -583,5 +656,90 @@ mod tests {
 
         settings.set_user_language("   ");
         assert_eq!(settings.user_language(), None);
+    }
+
+    #[test]
+    fn merge_with_all_none_vault_config_returns_unchanged_settings() {
+        let settings = Settings::default();
+        let vc = VaultConfig::default();
+        let merged = settings.merged_with_vault(&vc);
+        assert_eq!(merged.chat_provider(), settings.chat_provider());
+        assert_eq!(merged.chat_model(), settings.chat_model());
+        assert_eq!(merged.chat_model_id(), settings.chat_model_id());
+        assert_eq!(merged.embedding_provider(), settings.embedding_provider());
+        assert_eq!(merged.embedding_model_id(), settings.embedding_model_id());
+        assert_eq!(
+            merged.retrieval_rerank_enabled(),
+            settings.retrieval_rerank_enabled()
+        );
+        assert_eq!(
+            merged.retrieval_rerank_top_k(),
+            settings.retrieval_rerank_top_k()
+        );
+        assert_eq!(merged.user_language(), settings.user_language());
+    }
+
+    #[test]
+    fn merge_overrides_specified_fields() {
+        let settings = Settings::default();
+        let vc = VaultConfig {
+            chat_model_id: Some("anthropic:claude-sonnet-4-6".to_string()),
+            retrieval_rerank_top_k: Some(20),
+            user_language: Some("Japanese".to_string()),
+            ..Default::default()
+        };
+        let merged = settings.merged_with_vault(&vc);
+        assert_eq!(merged.chat_model_id(), "anthropic:claude-sonnet-4-6");
+        assert_eq!(merged.retrieval_rerank_top_k(), 20);
+        assert_eq!(merged.user_language(), Some("Japanese".to_string()));
+        // Unset fields should remain from global
+        assert_eq!(merged.embedding_model_id(), settings.embedding_model_id());
+    }
+
+    #[test]
+    fn merge_preserves_credentials() {
+        let mut settings = Settings::default();
+        settings.set_api_key("openai", "sk-test-123");
+        settings.tavily_api_key = Some("tvly-test".to_string());
+        let vc = VaultConfig {
+            chat_model_id: Some("anthropic:claude-sonnet-4-6".to_string()),
+            ..Default::default()
+        };
+        let merged = settings.merged_with_vault(&vc);
+        assert_eq!(
+            merged.api_key_for_provider("openai"),
+            Some("sk-test-123".to_string())
+        );
+        assert_eq!(merged.tavily_api_key(), "tvly-test");
+    }
+
+    #[test]
+    fn vault_config_load_missing_file_returns_default() {
+        let vault =
+            std::env::temp_dir().join(format!("meld-vault-config-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&vault).expect("create temp vault");
+        let vc = VaultConfig::load(&vault);
+        assert!(vc.chat_model_id.is_none());
+        assert!(vc.chat_provider.is_none());
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[test]
+    fn vault_config_load_ignores_unknown_keys() {
+        let vault =
+            std::env::temp_dir().join(format!("meld-vault-config-test-{}", uuid::Uuid::new_v4()));
+        let meld = vault.join(".meld");
+        std::fs::create_dir_all(&meld).expect("create .meld dir");
+        std::fs::write(
+            meld.join("config.toml"),
+            "chat_model_id = \"anthropic:claude-sonnet-4-6\"\nunknown_field = true\n",
+        )
+        .expect("write config");
+        let vc = VaultConfig::load(&vault);
+        assert_eq!(
+            vc.chat_model_id,
+            Some("anthropic:claude-sonnet-4-6".to_string())
+        );
+        let _ = std::fs::remove_dir_all(vault);
     }
 }

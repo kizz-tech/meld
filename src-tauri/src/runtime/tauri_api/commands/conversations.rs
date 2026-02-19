@@ -177,12 +177,15 @@ pub async fn send_message(
     message: String,
     conversation_id: Option<String>,
 ) -> Result<SendMessageResponse, String> {
-    let mut settings = Settings::load_global();
-    let vault_path = settings
+    let global_settings = Settings::load_global();
+    let vault_path = global_settings
         .vault_path
         .clone()
         .ok_or("No vault configured")?
         .to_string();
+    let vault_config =
+        crate::adapters::config::VaultConfig::load(std::path::Path::new(&vault_path));
+    let mut settings = global_settings.merged_with_vault(&vault_config);
     let provider = settings.chat_provider();
     let api_key = resolve_provider_credential(&mut settings, &provider).await?;
     let model = settings.chat_model();
@@ -234,12 +237,15 @@ pub async fn regenerate_last_response(
     conversation_id: String,
     assistant_message_id: Option<String>,
 ) -> Result<SendMessageResponse, String> {
-    let mut settings = Settings::load_global();
-    let vault_path = settings
+    let global_settings = Settings::load_global();
+    let vault_path = global_settings
         .vault_path
         .clone()
         .ok_or("No vault configured")?
         .to_string();
+    let vault_config =
+        crate::adapters::config::VaultConfig::load(std::path::Path::new(&vault_path));
+    let mut settings = global_settings.merged_with_vault(&vault_config);
     let provider = settings.chat_provider();
     let api_key = resolve_provider_credential(&mut settings, &provider).await?;
     let model = settings.chat_model();
@@ -298,12 +304,15 @@ pub async fn edit_user_message(
         return Err("content cannot be empty".to_string());
     }
 
-    let mut settings = Settings::load_global();
-    let vault_path = settings
+    let global_settings = Settings::load_global();
+    let vault_path = global_settings
         .vault_path
         .clone()
         .ok_or("No vault configured")?
         .to_string();
+    let vault_config =
+        crate::adapters::config::VaultConfig::load(std::path::Path::new(&vault_path));
+    let mut settings = global_settings.merged_with_vault(&vault_config);
     let provider = settings.chat_provider();
     let api_key = resolve_provider_credential(&mut settings, &provider).await?;
     let model = settings.chat_model();

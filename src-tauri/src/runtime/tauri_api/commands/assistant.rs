@@ -193,6 +193,15 @@ fn register_capture_listeners(
     listeners
 }
 
+fn merge_instruction_texts(global: Option<String>, local: Option<String>) -> Option<String> {
+    match (global, local) {
+        (Some(g), Some(l)) => Some(format!("{g}\n\n{l}")),
+        (Some(g), None) => Some(g),
+        (None, Some(l)) => Some(l),
+        (None, None) => None,
+    }
+}
+
 fn load_instruction_sources(vault: &Path) -> crate::core::agent::instructions::InstructionSources {
     match crate::adapters::vault::ensure_vault_initialized(vault) {
         Ok(()) => {}
@@ -202,8 +211,14 @@ fn load_instruction_sources(vault: &Path) -> crate::core::agent::instructions::I
     }
 
     let agents_md = crate::adapters::vault::read_agents_md(vault);
-    let rules = crate::adapters::vault::read_meld_rules(vault);
-    let hints = crate::adapters::vault::read_meld_hints(vault);
+
+    let global_rules = crate::adapters::vault::read_global_rules();
+    let local_rules = crate::adapters::vault::read_meld_rules(vault);
+    let rules = merge_instruction_texts(global_rules, local_rules);
+
+    let global_hints = crate::adapters::vault::read_global_hints();
+    let local_hints = crate::adapters::vault::read_meld_hints(vault);
+    let hints = merge_instruction_texts(global_hints, local_hints);
 
     crate::core::agent::instructions::InstructionSources {
         agents_md,
@@ -234,7 +249,9 @@ async fn execute_assistant_run(
         .and_then(|db| db.index_stats().ok())
         .unwrap_or((0, 0));
 
-    let mut settings = crate::adapters::config::Settings::load_global();
+    let global_settings = crate::adapters::config::Settings::load_global();
+    let vault_config = crate::adapters::config::VaultConfig::load(vault);
+    let mut settings = global_settings.merged_with_vault(&vault_config);
     let user_language = settings.user_language();
     let embedding_provider = settings.embedding_provider();
     let embedding_key =
@@ -261,7 +278,9 @@ async fn execute_assistant_run(
     let agent = crate::core::agent::Agent::new(
         Arc::new(tool_registry),
         Arc::new(crate::adapters::llm::ChatLlmAdapter::new()),
-        Arc::new(crate::adapters::vectordb::SqliteRunStore::new(db_path.clone())),
+        Arc::new(crate::adapters::vectordb::SqliteRunStore::new(
+            db_path.clone(),
+        )),
         Arc::new(crate::adapters::emitter::TauriEmitter::new(app.clone())),
     );
 
@@ -324,8 +343,8 @@ async fn execute_assistant_run(
                 serde_json::to_string(&captured.timeline_steps).ok()
             };
 
-            let persist_result = crate::adapters::vectordb::VectorDb::open(&db_path).and_then(
-                |mut db| {
+            let persist_result =
+                crate::adapters::vectordb::VectorDb::open(&db_path).and_then(|mut db| {
                     db.save_message(
                         conversation_id,
                         "assistant",
@@ -335,8 +354,7 @@ async fn execute_assistant_run(
                         timeline.as_deref(),
                     )
                     .map(|_| ())
-                },
-            );
+                });
 
             match persist_result {
                 Ok(_) => {

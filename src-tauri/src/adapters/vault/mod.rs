@@ -95,15 +95,68 @@ pub fn read_meld_hints(vault_path: &Path) -> Option<String> {
     read_optional_text(&vault_path.join(".meld").join("hints"))
 }
 
+pub fn read_global_rules() -> Option<String> {
+    read_optional_text(&crate::adapters::config::Settings::global_rules_path())
+}
+
+pub fn read_global_hints() -> Option<String> {
+    read_optional_text(&crate::adapters::config::Settings::global_hints_path())
+}
+
 pub fn ensure_vault_initialized(vault_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let meld = vault_path.join(".meld");
     if meld.exists() {
+        // Ensure state/ exists even for already-initialized vaults
+        std::fs::create_dir_all(meld.join("state")).ok();
         return Ok(());
     }
 
     std::fs::create_dir_all(&meld)?;
-    std::fs::write(vault_path.join("AGENTS.md"), DEFAULT_AGENTS_MD_TEMPLATE)?;
-    std::fs::write(meld.join("hints"), DEFAULT_MELD_HINTS_TEMPLATE)?;
+    std::fs::create_dir_all(meld.join("state"))?;
+
+    let templates_dir = crate::adapters::config::Settings::global_templates_dir();
+    let defaults_dir = crate::adapters::config::Settings::global_defaults_dir();
+
+    // AGENTS.md — use template if available
+    let agents_template = templates_dir.join("agents.md");
+    if agents_template.exists() {
+        if let Ok(content) = std::fs::read_to_string(&agents_template) {
+            std::fs::write(vault_path.join("AGENTS.md"), content)?;
+        } else {
+            std::fs::write(vault_path.join("AGENTS.md"), DEFAULT_AGENTS_MD_TEMPLATE)?;
+        }
+    } else {
+        std::fs::write(vault_path.join("AGENTS.md"), DEFAULT_AGENTS_MD_TEMPLATE)?;
+    }
+
+    // hints — use template if available
+    let hints_template = templates_dir.join("hints");
+    if hints_template.exists() {
+        if let Ok(content) = std::fs::read_to_string(&hints_template) {
+            std::fs::write(meld.join("hints"), content)?;
+        } else {
+            std::fs::write(meld.join("hints"), DEFAULT_MELD_HINTS_TEMPLATE)?;
+        }
+    } else {
+        std::fs::write(meld.join("hints"), DEFAULT_MELD_HINTS_TEMPLATE)?;
+    }
+
+    // rules — copy from template if exists (not created by default)
+    let rules_template = templates_dir.join("rules");
+    if rules_template.exists() {
+        if let Ok(content) = std::fs::read_to_string(&rules_template) {
+            std::fs::write(meld.join("rules"), content)?;
+        }
+    }
+
+    // vault config — copy from defaults/settings.toml if exists
+    let defaults_settings = defaults_dir.join("settings.toml");
+    if defaults_settings.exists() {
+        if let Ok(content) = std::fs::read_to_string(&defaults_settings) {
+            std::fs::write(meld.join("config.toml"), content)?;
+        }
+    }
+
     Ok(())
 }
 
@@ -276,6 +329,7 @@ mod tests {
 
         assert!(vault.join("AGENTS.md").exists());
         assert!(vault.join(".meld").join("hints").exists());
+        assert!(vault.join(".meld").join("state").is_dir());
         assert!(read_agents_md(&vault).is_some());
         assert!(read_meld_hints(&vault).is_some());
 
