@@ -1251,15 +1251,20 @@ export default function Sidebar({
         }`}
       >
         <div className="flex h-full flex-col">
-          <div className="p-3 pb-3.5">
+          {/* Tab switcher — floating */}
+          <div className="relative z-[1] px-3 pt-3 pb-3">
             {!sidebarCollapsed && (
-              <div className="mb-3 grid grid-cols-2 rounded-xl bg-bg/50 p-0.5">
+              <div className="relative grid grid-cols-2 rounded-2xl border border-border/25 bg-bg-secondary/80 p-1 shadow-lg shadow-black/30 backdrop-blur-md">
+                <div
+                  className="absolute top-1 bottom-1 w-[calc(50%-4px)] rounded-xl bg-bg-tertiary/90 shadow-sm shadow-black/20 transition-transform duration-200 ease-out"
+                  style={{ transform: viewMode === "files" ? "translateX(calc(100% + 8px))" : "translateX(0)" }}
+                />
                 <button
                   type="button"
                   onClick={() => setViewMode("chats")}
-                  className={`rounded-md px-2 py-1 text-xs transition-colors ${
+                  className={`relative z-[1] rounded-xl px-2 py-1.5 text-xs font-medium transition-colors duration-200 ${
                     viewMode === "chats"
-                      ? "bg-bg-tertiary text-text"
+                      ? "text-text"
                       : "text-text-muted hover:text-text-secondary"
                   }`}
                 >
@@ -1268,9 +1273,9 @@ export default function Sidebar({
                 <button
                   type="button"
                   onClick={() => setViewMode("files")}
-                  className={`rounded-md px-2 py-1 text-xs transition-colors ${
+                  className={`relative z-[1] rounded-xl px-2 py-1.5 text-xs font-medium transition-colors duration-200 ${
                     viewMode === "files"
-                      ? "bg-bg-tertiary text-text"
+                      ? "text-text"
                       : "text-text-muted hover:text-text-secondary"
                   }`}
                 >
@@ -1280,13 +1285,17 @@ export default function Sidebar({
             )}
 
             {sidebarCollapsed && (
-              <div className="mb-3 flex flex-col gap-1">
+              <div className="relative flex flex-col gap-0.5 rounded-2xl border border-border/25 bg-bg-secondary/80 p-1 shadow-lg shadow-black/30 backdrop-blur-md">
+                <div
+                  className="absolute left-1 right-1 h-[calc(50%-3px)] rounded-xl bg-bg-tertiary/90 shadow-sm shadow-black/20 transition-transform duration-200 ease-out"
+                  style={{ transform: viewMode === "files" ? "translateY(calc(100% + 6px))" : "translateY(0)" }}
+                />
                 <button
                   type="button"
                   onClick={() => setViewMode("chats")}
-                  className={`rounded-md px-2 py-1 text-[11px] transition-colors ${
+                  className={`relative z-[1] rounded-xl px-2 py-1.5 text-[11px] font-medium transition-colors duration-200 ${
                     viewMode === "chats"
-                      ? "bg-bg-tertiary text-text"
+                      ? "text-text"
                       : "text-text-muted hover:text-text-secondary"
                   }`}
                   title="Chats"
@@ -1296,9 +1305,9 @@ export default function Sidebar({
                 <button
                   type="button"
                   onClick={() => setViewMode("files")}
-                  className={`rounded-md px-2 py-1 text-[11px] transition-colors ${
+                  className={`relative z-[1] rounded-xl px-2 py-1.5 text-[11px] font-medium transition-colors duration-200 ${
                     viewMode === "files"
-                      ? "bg-bg-tertiary text-text"
+                      ? "text-text"
                       : "text-text-muted hover:text-text-secondary"
                   }`}
                   title="Knowledge"
@@ -1307,157 +1316,182 @@ export default function Sidebar({
                 </button>
               </div>
             )}
-
-            <button
-              type="button"
-              onClick={() => {
-                if (viewMode === "chats") {
-                  startNewChat(null);
-                  return;
-                }
-                void createRootKnowledgeNote();
-              }}
-              className="flex w-full items-center justify-center gap-2 rounded-xl border border-accent/20 bg-accent/[0.06] px-2 py-2 text-sm text-accent/80 transition-all duration-[120ms] hover:bg-accent/[0.12] hover:text-accent hover:border-accent/30"
-              title={viewMode === "chats" ? "New chat" : "New note"}
-            >
-              <span className="text-base leading-none">+</span>
-              {!sidebarCollapsed && (
-                <span>{viewMode === "chats" ? "New chat" : "New note"}</span>
-              )}
-            </button>
-
-            {!sidebarCollapsed && (
-              <button
-                type="button"
-                onClick={() => {
-                  if (viewMode === "chats") {
-                    createFolder(null);
-                    return;
-                  }
-                  void createRootKnowledgeFolder();
-                }}
-                className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-border/20 bg-bg-tertiary/30 px-2 py-1.5 text-xs text-text-secondary transition-all duration-[120ms] hover:bg-bg-tertiary/60 hover:text-text hover:border-border/40"
-                title="New folder"
-              >
-                <span className="text-sm leading-none">+</span>
-                <span>New folder</span>
-              </button>
-            )}
           </div>
 
-          <div className="min-h-0 flex-1 overflow-hidden px-2.5 py-2">
-            {viewMode === "files" ? (
-              sidebarCollapsed ? null : (
-                <VaultBrowser
-                  entries={vaultEntries}
-                  loading={loadingVaultFiles}
-                  activeNote={activeNotePath}
-                  onSelectNote={onSelectNote}
-                  onCreateNote={onCreateKbNote}
-                  onCreateFolder={onCreateKbFolder}
-                  onArchiveEntry={onArchiveKbEntry}
-                  onMoveEntry={onMoveKbEntry}
-                />
-              )
-            ) : (
-              <TreeSurface
-                onRootContextMenu={(event) => {
-                  openContextMenu(event, { kind: "root", id: "root" });
-                }}
-                onRootDragOver={(event) => {
-                  const entity = resolveDraggingEntity(event);
-                  if (!canDropToRoot(entity)) return;
-                  event.preventDefault();
-                  setDropTarget({ kind: "root" });
-                }}
-                onRootDragLeave={(event) => {
-                  if (event.currentTarget !== event.target) return;
-                  if (dropTarget?.kind === "root") {
-                    setDropTarget(null);
-                  }
-                }}
-                onRootDrop={(event) => {
-                  const entity = resolveDraggingEntity(event);
-                  if (!entity) return;
-                  event.preventDefault();
-                  event.stopPropagation();
-                  dropEntityToRoot(entity);
-                }}
-              >
-                {!sidebarCollapsed && rootFolders.map((folder) => renderFolderRow(folder, 0))}
-                {!sidebarCollapsed &&
-                  rootConversations.map((conversation) =>
-                    renderConversationRow(conversation, 0),
-                  )}
-
-                {sidebarCollapsed && (
-                  <div>
-                    {activeConversations.map((conversation) =>
-                      renderConversationRow(conversation, 0),
-                    )}
-                  </div>
-                )}
-
-                {!sidebarCollapsed && archivedConversations.length > 0 && (
-                  <div className="mt-2">
+          {/* Sliding content — buttons + list swipe together */}
+          <div className="min-h-0 flex-1 overflow-hidden">
+            <div
+              className="flex h-full transition-transform duration-250 ease-out"
+              style={{
+                width: "200%",
+                transform: viewMode === "files" ? "translateX(-50%)" : "translateX(0)",
+              }}
+            >
+              {/* ── Chats page ── */}
+              <div className="flex h-full w-1/2 flex-col">
+                <div className="shrink-0 space-y-2 px-3 pb-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => startNewChat(null)}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-accent/20 bg-accent/[0.06] px-2 py-2 text-sm text-accent/80 transition-all duration-[120ms] hover:bg-accent/[0.12] hover:text-accent hover:border-accent/30"
+                    title="New chat"
+                  >
+                    <span className="text-base leading-none">+</span>
+                    {!sidebarCollapsed && <span>New chat</span>}
+                  </button>
+                  {!sidebarCollapsed && (
                     <button
                       type="button"
-                      onClick={() => setShowArchived((prev) => !prev)}
-                      className="mb-1.5 flex w-full items-center justify-between px-1 text-[10px] font-mono uppercase tracking-widest text-text-muted/70 hover:text-text-secondary"
+                      onClick={() => createFolder(null)}
+                      className="flex w-full items-center justify-center gap-2 rounded-xl border border-border/20 bg-bg-tertiary/30 px-2 py-1.5 text-xs text-text-secondary transition-all duration-[120ms] hover:bg-bg-tertiary/60 hover:text-text hover:border-border/40"
+                      title="New folder"
                     >
-                      <span>Archived ({archivedConversations.length})</span>
-                      <span>{showArchived ? "▾" : "▸"}</span>
+                      <span className="text-sm leading-none">+</span>
+                      <span>New folder</span>
                     </button>
-                    {showArchived && (
+                  )}
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-2">
+                  <TreeSurface
+                    onRootContextMenu={(event) => {
+                      openContextMenu(event, { kind: "root", id: "root" });
+                    }}
+                    onRootDragOver={(event) => {
+                      const entity = resolveDraggingEntity(event);
+                      if (!canDropToRoot(entity)) return;
+                      event.preventDefault();
+                      setDropTarget({ kind: "root" });
+                    }}
+                    onRootDragLeave={(event) => {
+                      if (event.currentTarget !== event.target) return;
+                      if (dropTarget?.kind === "root") {
+                        setDropTarget(null);
+                      }
+                    }}
+                    onRootDrop={(event) => {
+                      const entity = resolveDraggingEntity(event);
+                      if (!entity) return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      dropEntityToRoot(entity);
+                    }}
+                  >
+                    {!sidebarCollapsed && rootFolders.map((folder) => renderFolderRow(folder, 0))}
+                    {!sidebarCollapsed &&
+                      rootConversations.map((conversation) =>
+                        renderConversationRow(conversation, 0),
+                      )}
+
+                    {sidebarCollapsed && (
                       <div>
-                        {archivedConversations.map((conversation) => {
-                          const title = getConversationTitle(conversation);
-                          return (
-                            <div
-                              key={`archived:${String(conversation.id)}`}
-                              onContextMenu={(event) => {
-                                openContextMenu(event, {
-                                  kind: "conversation",
-                                  id: String(conversation.id),
-                                });
-                              }}
-                              className="group relative flex w-full min-w-0 items-center rounded-lg px-2.5 py-2 text-left text-[13px] transition-all duration-[120ms] text-text-secondary hover:bg-bg-tertiary/50 hover:text-text"
-                              style={{ paddingLeft: "8px" }}
-                            >
-                              <button
-                                type="button"
-                                onClick={() => onSelectConversation(conversation.id)}
-                                title={title}
-                                className="min-w-0 flex-1 truncate text-left"
-                              >
-                                {title}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(event) => {
-                                  event.preventDefault();
-                                  event.stopPropagation();
-                                  void unarchiveConversationRow(conversation);
-                                }}
-                                className="rounded px-1.5 py-0.5 text-[10px] text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
-                              >
-                                Unarchive
-                              </button>
-                            </div>
-                          );
-                        })}
+                        {activeConversations.map((conversation) =>
+                          renderConversationRow(conversation, 0),
+                        )}
                       </div>
                     )}
-                  </div>
-                )}
 
-                {!sidebarCollapsed &&
-                  activeConversations.length === 0 &&
-                  archivedConversations.length === 0 && (
-                    <p className="px-2 text-xs text-text-muted/60">No chats yet.</p>
+                    {!sidebarCollapsed && archivedConversations.length > 0 && (
+                      <div className="mt-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowArchived((prev) => !prev)}
+                          className="mb-1.5 flex w-full items-center justify-between px-1 text-[10px] font-mono uppercase tracking-widest text-text-muted/70 hover:text-text-secondary"
+                        >
+                          <span>Archived ({archivedConversations.length})</span>
+                          <span>{showArchived ? "▾" : "▸"}</span>
+                        </button>
+                        {showArchived && (
+                          <div>
+                            {archivedConversations.map((conversation) => {
+                              const title = getConversationTitle(conversation);
+                              return (
+                                <div
+                                  key={`archived:${String(conversation.id)}`}
+                                  onContextMenu={(event) => {
+                                    openContextMenu(event, {
+                                      kind: "conversation",
+                                      id: String(conversation.id),
+                                    });
+                                  }}
+                                  className="group relative flex w-full min-w-0 items-center rounded-lg px-2.5 py-2 text-left text-[13px] transition-all duration-[120ms] text-text-secondary hover:bg-bg-tertiary/50 hover:text-text"
+                                  style={{ paddingLeft: "8px" }}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => onSelectConversation(conversation.id)}
+                                    title={title}
+                                    className="min-w-0 flex-1 truncate text-left"
+                                  >
+                                    {title}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(event) => {
+                                      event.preventDefault();
+                                      event.stopPropagation();
+                                      void unarchiveConversationRow(conversation);
+                                    }}
+                                    className="rounded px-1.5 py-0.5 text-[10px] text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
+                                  >
+                                    Unarchive
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {!sidebarCollapsed &&
+                      activeConversations.length === 0 &&
+                      archivedConversations.length === 0 && (
+                        <p className="px-2 text-xs text-text-muted/60">No chats yet.</p>
+                      )}
+                  </TreeSurface>
+                </div>
+              </div>
+
+              {/* ── Knowledge page ── */}
+              <div className="flex h-full w-1/2 flex-col">
+                <div className="shrink-0 space-y-2 px-3 pb-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => void createRootKnowledgeNote()}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-accent/20 bg-accent/[0.06] px-2 py-2 text-sm text-accent/80 transition-all duration-[120ms] hover:bg-accent/[0.12] hover:text-accent hover:border-accent/30"
+                    title="New note"
+                  >
+                    <span className="text-base leading-none">+</span>
+                    {!sidebarCollapsed && <span>New note</span>}
+                  </button>
+                  {!sidebarCollapsed && (
+                    <button
+                      type="button"
+                      onClick={() => void createRootKnowledgeFolder()}
+                      className="flex w-full items-center justify-center gap-2 rounded-xl border border-border/20 bg-bg-tertiary/30 px-2 py-1.5 text-xs text-text-secondary transition-all duration-[120ms] hover:bg-bg-tertiary/60 hover:text-text hover:border-border/40"
+                      title="New folder"
+                    >
+                      <span className="text-sm leading-none">+</span>
+                      <span>New folder</span>
+                    </button>
                   )}
-              </TreeSurface>
-            )}
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-2">
+                  {!sidebarCollapsed && (
+                    <VaultBrowser
+                      entries={vaultEntries}
+                      loading={loadingVaultFiles}
+                      activeNote={activeNotePath}
+                      onSelectNote={onSelectNote}
+                      onCreateNote={onCreateKbNote}
+                      onCreateFolder={onCreateKbFolder}
+                      onArchiveEntry={onArchiveKbEntry}
+                      onMoveEntry={onMoveKbEntry}
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
 
           <div className="p-3 pt-3.5">

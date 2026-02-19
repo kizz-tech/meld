@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { X } from "lucide-react";
 import { useAppStore } from "@/lib/store";
 import { getHistory, revertCommit, type HistoryEntry } from "@/lib/tauri";
 
@@ -43,16 +44,14 @@ export default function HistoryPanel() {
   }
 
   return (
-    <div className="p-6 space-y-6 h-full overflow-y-auto max-w-xl mx-auto">
+    <div className="p-6 space-y-6 h-full overflow-y-auto scrollbar-visible max-w-xl mx-auto">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-semibold">History</h2>
         <button
           onClick={() => useAppStore.getState().toggleHistory()}
           className="text-text-muted hover:text-text transition-colors"
         >
-          <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-            <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
-          </svg>
+          <X className="h-4 w-4" />
         </button>
       </div>
 

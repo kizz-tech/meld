@@ -1,5 +1,7 @@
 "use client";
 
+import { RefreshCw } from "lucide-react";
+
 interface StatusBarProps {
   vaultPath: string | null;
   fileCount: number;
@@ -47,16 +49,7 @@ export default function StatusBar({
           title={isIndexing ? "Indexing in progress" : "Reindex"}
           aria-label={isIndexing ? "Indexing in progress" : "Reindex"}
         >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={1.8}
-            className={`h-3 w-3 ${isIndexing ? "animate-spin" : ""}`}
-          >
-            <path d="M3 12a9 9 0 1 0 3-6.7" />
-            <path d="M3 4v4h4" />
-          </svg>
+          <RefreshCw className={`h-3 w-3 ${isIndexing ? "animate-spin" : ""}`} strokeWidth={1.8} />
         </button>
       </span>
       <span className="pill-badge shrink-0 text-text-muted">

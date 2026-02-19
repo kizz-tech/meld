@@ -17,6 +17,7 @@ import {
   transformWikilinks,
 } from "@/lib/wikilinks";
 import { openFileExternal } from "@/lib/tauri";
+import { X, ExternalLink, ChevronLeft, ChevronRight, Copy, Check } from "lucide-react";
 import FrontmatterBlock from "@/components/vault/FrontmatterBlock";
 
 interface NotePreviewProps {
@@ -140,18 +141,9 @@ function MarkdownCodeBlock({
           aria-label={copied ? "Copied" : "Copy code"}
         >
           {copied ? (
-            <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5">
-              <path
-                fillRule="evenodd"
-                d="M16.704 5.29a1 1 0 00-1.408-1.418L8.08 11.057 4.704 7.67a1 1 0 10-1.408 1.418l4.08 4.09a1 1 0 001.417 0l7.91-7.888z"
-                clipRule="evenodd"
-              />
-            </svg>
+            <Check className="h-3.5 w-3.5" />
           ) : (
-            <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5">
-              <path d="M5 4a2 2 0 012-2h6a2 2 0 012 2v8a2 2 0 01-2 2H7a2 2 0 01-2-2V4z" />
-              <path d="M3 6a1 1 0 00-1 1v9a2 2 0 002 2h7a1 1 0 100-2H4V7a1 1 0 00-1-1z" />
-            </svg>
+            <Copy className="h-3.5 w-3.5" />
           )}
         </button>
       </div>
@@ -248,13 +240,7 @@ export default function NotePreview({
               disabled={!notePath}
               onClick={() => onOpenNote("")}
             >
-              <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5">
-                <path
-                  fillRule="evenodd"
-                  d="M4.28 4.22a.75.75 0 011.06 0L10 8.94l4.66-4.72a.75.75 0 111.06 1.06L11.06 10l4.66 4.72a.75.75 0 11-1.06 1.06L10 11.06l-4.66 4.72a.75.75 0 11-1.06-1.06L8.94 10 4.28 5.28a.75.75 0 010-1.06z"
-                  clipRule="evenodd"
-                />
-              </svg>
+              <X className="h-3.5 w-3.5" />
             </ToolbarIconButton>
             <ToolbarIconButton
               label="Open in editor"
@@ -265,53 +251,27 @@ export default function NotePreview({
                 }
               }}
             >
-              <svg
-                viewBox="0 0 20 20"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={1.6}
-                className="h-3.5 w-3.5"
-              >
-                <path d="M7 5h8v8" strokeLinecap="round" />
-                <path d="M5 15L15 5" strokeLinecap="round" />
-                <path d="M5 9V5h4" strokeLinecap="round" />
-              </svg>
+              <ExternalLink className="h-3.5 w-3.5" strokeWidth={1.6} />
             </ToolbarIconButton>
             <ToolbarIconButton
               label="Back"
               disabled={!canGoBack}
               onClick={onGoBack}
             >
-              <svg
-                viewBox="0 0 20 20"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={1.7}
-                className="h-3.5 w-3.5"
-              >
-                <path d="M12.5 4.5L7 10l5.5 5.5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
+              <ChevronLeft className="h-3.5 w-3.5" strokeWidth={1.7} />
             </ToolbarIconButton>
             <ToolbarIconButton
               label="Forward"
               disabled={!canGoForward}
               onClick={onGoForward}
             >
-              <svg
-                viewBox="0 0 20 20"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={1.7}
-                className="h-3.5 w-3.5"
-              >
-                <path d="M7.5 4.5L13 10l-5.5 5.5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
+              <ChevronRight className="h-3.5 w-3.5" strokeWidth={1.7} />
             </ToolbarIconButton>
           </div>
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+      <div className="min-h-0 flex-1 overflow-y-auto scrollbar-visible px-6 py-5">
         {loading ? (
           <div className="flex h-full items-center justify-center">
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-text-muted/60 border-t-transparent" />

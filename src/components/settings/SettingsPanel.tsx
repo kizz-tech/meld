@@ -1,8 +1,10 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
+import { X } from "lucide-react";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+import { open } from "@tauri-apps/plugin-dialog";
 import { useAppStore } from "@/lib/store";
 import ComboSelect, { type ComboOption } from "@/components/ui/ComboSelect";
 import {
@@ -14,27 +16,37 @@ import {
   setFallbackModel,
   setUserLanguage,
   reindex,
+  selectVault,
+  openDevtools,
   type ProviderCatalogEntry,
 } from "@/lib/tauri";
 
 const KNOWN_MODELS: Record<string, ComboOption[]> = {
   openai: [
     { value: "gpt-5.2", label: "GPT-5.2" },
-    { value: "gpt-4.1", label: "GPT-4.1" },
-    { value: "gpt-4.1-mini", label: "GPT-4.1 Mini" },
-    { value: "gpt-4.1-nano", label: "GPT-4.1 Nano" },
-    { value: "o3", label: "o3" },
-    { value: "o4-mini", label: "o4 Mini" },
+    { value: "gpt-5.1", label: "GPT-5.1" },
+    { value: "gpt-5", label: "GPT-5" },
+    { value: "gpt-5-nano", label: "GPT-5 Nano" },
   ],
   anthropic: [
     { value: "claude-opus-4-6", label: "Claude Opus 4.6" },
+    { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
     { value: "claude-sonnet-4-5-20250929", label: "Claude Sonnet 4.5" },
     { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
   ],
   google: [
-    { value: "gemini-3-flash-preview", label: "Gemini 3 Flash Preview" },
-    { value: "gemini-2.5-pro-preview-05-06", label: "Gemini 2.5 Pro" },
-    { value: "gemini-2.5-flash-preview-05-20", label: "Gemini 2.5 Flash" },
+    { value: "gemini-3-pro-preview", label: "Gemini 3 Pro" },
+    { value: "gemini-3-flash-preview", label: "Gemini 3 Flash" },
+  ],
+  openrouter: [
+    { value: "deepseek/deepseek-r1-0528:free", label: "DeepSeek R1", badge: "Free" },
+    { value: "qwen/qwen3-coder:free", label: "Qwen3 Coder", badge: "Free" },
+    { value: "qwen/qwen3-235b-a22b-thinking-2507", label: "Qwen3 235B Thinking", badge: "Free" },
+    { value: "meta-llama/llama-3.3-70b-instruct:free", label: "Llama 3.3 70B", badge: "Free" },
+    { value: "nousresearch/hermes-3-llama-3.1-405b:free", label: "Hermes 3 405B", badge: "Free" },
+    { value: "google/gemma-3-27b-it:free", label: "Gemma 3 27B", badge: "Free" },
+    { value: "mistralai/mistral-small-3.1-24b-instruct:free", label: "Mistral Small 3.1", badge: "Free" },
+    { value: "nvidia/nemotron-3-nano-30b-a3b:free", label: "Nemotron 3 Nano 30B", badge: "Free" },
   ],
 };
 
@@ -50,10 +62,9 @@ const KNOWN_EMBEDDING_MODELS: Record<string, ComboOption[]> = {
 
 const FALLBACK_OPTIONS: ComboOption[] = [
   { value: "", label: "None (disabled)" },
-  { value: "openai:gpt-4.1-mini", label: "OpenAI GPT-4.1 Mini" },
-  { value: "openai:gpt-4.1-nano", label: "OpenAI GPT-4.1 Nano" },
+  { value: "openai:gpt-5-nano", label: "OpenAI GPT-5 Nano" },
   { value: "anthropic:claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
-  { value: "google:gemini-2.5-flash-preview-05-20", label: "Gemini 2.5 Flash" },
+  { value: "google:gemini-3-flash-preview", label: "Gemini 3 Flash" },
 ];
 
 export default function SettingsPanel() {
@@ -85,8 +96,14 @@ export default function SettingsPanel() {
         setUpdateStatus("upToDate");
       }
     } catch (e) {
-      setUpdateError(e instanceof Error ? e.message : String(e));
-      setUpdateStatus("error");
+      const msg = e instanceof Error ? e.message : String(e);
+      // Network errors or missing release JSON are not real errors
+      if (/fetch|network|remote|json|404|not found/i.test(msg)) {
+        setUpdateStatus("upToDate");
+      } else {
+        setUpdateError(msg);
+        setUpdateStatus("error");
+      }
     }
   }, []);
 
@@ -173,7 +190,10 @@ export default function SettingsPanel() {
     return [
       { value: "openai", label: "OpenAI" },
       { value: "anthropic", label: "Anthropic" },
-      { value: "google", label: "Google" },
+      { value: "google", label: "Google Gemini" },
+      { value: "openrouter", label: "OpenRouter" },
+      { value: "ollama", label: "Ollama" },
+      { value: "lm_studio", label: "LM Studio" },
     ];
   }, [llmProviders]);
 
@@ -201,16 +221,14 @@ export default function SettingsPanel() {
   );
 
   return (
-    <div className="p-6 space-y-8 h-full overflow-y-auto max-w-xl mx-auto">
+    <div className="p-6 space-y-8 h-full overflow-y-auto scrollbar-visible max-w-xl mx-auto">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-semibold">Settings</h2>
         <button
           onClick={() => store.toggleSettings()}
           className="text-text-muted hover:text-text transition-colors"
         >
-          <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-            <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
-          </svg>
+          <X className="h-4 w-4" />
         </button>
       </div>
 
@@ -219,13 +237,31 @@ export default function SettingsPanel() {
         <h3 className="text-sm font-medium text-text-secondary">Vault</h3>
         <p className="text-xs text-text-muted truncate">{store.vaultPath}</p>
         <p className="text-xs text-text-muted">{store.fileCount} notes</p>
-        <button
-          onClick={handleReindex}
-          disabled={store.isIndexing}
-          className="text-xs px-3 py-1.5 bg-bg-tertiary/80 rounded-lg hover:bg-border transition-colors disabled:opacity-50"
-        >
-          {store.isIndexing ? "Indexing..." : "Reindex"}
-        </button>    
+        <div className="flex gap-2">
+          <button
+            onClick={async () => {
+              const selected = await open({ directory: true, multiple: false });
+              if (selected) {
+                try {
+                  const info = await selectVault(selected);
+                  store.setVaultPath(info.path, info.file_count);
+                } catch (e) {
+                  setReindexError(String(e));
+                }
+              }
+            }}
+            className="text-xs px-3 py-1.5 bg-bg-tertiary/80 rounded-lg hover:bg-border transition-colors"
+          >
+            Change vault
+          </button>
+          <button
+            onClick={handleReindex}
+            disabled={store.isIndexing}
+            className="text-xs px-3 py-1.5 bg-bg-tertiary/80 rounded-lg hover:bg-border transition-colors disabled:opacity-50"
+          >
+            {store.isIndexing ? "Indexing..." : "Reindex"}
+          </button>
+        </div>    
         {reindexError && (
           <p className="text-error text-xs mt-2">
             {reindexError}
@@ -318,7 +354,7 @@ export default function SettingsPanel() {
             if (userLanguage.trim()) setUserLanguage(userLanguage.trim());
           }}
           placeholder="auto (follows system)"
-          className="w-full p-2 text-sm bg-bg border border-transparent rounded-xl text-text placeholder:text-text-muted focus:outline-none focus:border-border-focus focus:shadow-[0_0_0_1px_var(--color-border-focus)]"
+          className="w-full p-2 text-sm bg-white/[0.03] border border-border/50 rounded-xl text-text placeholder:text-text-muted focus:outline-none focus:border-border-focus focus:bg-bg focus:shadow-[0_0_0_1px_var(--color-border-focus)]"
         />
       </section>
 
@@ -326,10 +362,10 @@ export default function SettingsPanel() {
       <section className="space-y-3">
         <h3 className="text-sm font-medium text-text-secondary">API Keys</h3>
 
-        {["openai", "anthropic", "google", "tavily"].map((provider) => (
+        {["openai", "anthropic", "google", "openrouter", "tavily"].map((provider) => (
           <div key={provider} className="space-y-1">
             <label className="text-xs text-text-muted capitalize">
-              {provider}
+              {provider === "openrouter" ? "OpenRouter" : provider}
             </label>
             <div className="flex gap-1">
               <input
@@ -348,9 +384,11 @@ export default function SettingsPanel() {
                       ? "sk-ant-..."
                       : provider === "google"
                         ? "AIza..."
-                        : "tvly-..."
+                        : provider === "openrouter"
+                          ? "sk-or-..."
+                          : "tvly-..."
                 }
-                className="flex-1 p-2 text-sm bg-bg border border-transparent rounded-xl text-text placeholder:text-text-muted focus:outline-none focus:border-border-focus focus:shadow-[0_0_0_1px_var(--color-border-focus)]"
+                className="flex-1 p-2 text-sm bg-white/[0.03] border border-border/50 rounded-xl text-text placeholder:text-text-muted focus:outline-none focus:border-border-focus focus:bg-bg focus:shadow-[0_0_0_1px_var(--color-border-focus)]"
               />
               <button
                 onClick={() =>
@@ -415,6 +453,17 @@ export default function SettingsPanel() {
             </div>
           )}
         </div>
+      </section>
+
+      {/* Developer */}
+      <section className="space-y-2">
+        <h3 className="text-sm font-medium text-text-secondary">Developer</h3>
+        <button
+          onClick={() => void openDevtools()}
+          className="text-xs px-3 py-1.5 bg-bg-tertiary/80 rounded-lg hover:bg-border transition-colors"
+        >
+          Open DevTools
+        </button>
       </section>
     </div>
   );

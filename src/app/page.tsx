@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { useHomeController } from "@/features/layout/controllers/useHomeController";
 import OnboardingFlow from "@/components/onboarding/OnboardingFlow";
 import ChatView from "@/components/chat/ChatView";
@@ -8,9 +9,51 @@ import NotePreview from "@/components/vault/NotePreview";
 import SettingsPanel from "@/components/settings/SettingsPanel";
 import HistoryPanel from "@/components/history/HistoryPanel";
 import StatusBar from "@/components/ui/StatusBar";
+import MeldLogo from "@/components/ui/MeldLogo";
+import { useAppStore } from "@/lib/store";
+import { History, Settings } from "lucide-react";
 
 export default function Home() {
   const { state, actions } = useHomeController();
+  const toastMessage = useAppStore((s) => s.toastMessage);
+  const clearToast = useAppStore((s) => s.clearToast);
+
+  // Block devtools shortcuts & native context menu
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (
+        (e.metaKey && e.altKey && (e.key === "i" || e.key === "I")) ||
+        (e.ctrlKey && e.shiftKey && (e.key === "i" || e.key === "I")) ||
+        e.key === "F12"
+      ) {
+        e.preventDefault();
+      }
+    };
+    const onContext = (e: MouseEvent) => {
+      // Allow native context menu only inside text inputs/textareas
+      const target = e.target as HTMLElement;
+      if (
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable
+      ) {
+        return;
+      }
+      e.preventDefault();
+    };
+    window.addEventListener("keydown", onKey, true);
+    window.addEventListener("contextmenu", onContext, true);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("contextmenu", onContext, true);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!toastMessage) return;
+    const timer = setTimeout(clearToast, 2500);
+    return () => clearTimeout(timer);
+  }, [toastMessage, clearToast]);
 
   if (!state.isOnboarded) {
     return <OnboardingFlow />;
@@ -62,14 +105,12 @@ export default function Home() {
         {/* Header */}
         <header className="relative z-10 flex items-center justify-between border-b border-border/15 px-5 py-3">
           <div className="flex items-center gap-2.5">
-            <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-accent/12 text-xs font-semibold text-accent">
-              M
-            </span>
-            <h1 className="font-display text-[15px] italic tracking-tight text-text">
+            <MeldLogo size={24} className="shrink-0 rounded-md" />
+            <h1 className="-translate-y-[1px] font-display text-[15px] italic leading-none tracking-tight text-text">
               meld
             </h1>
             {state.vaultPath && (
-              <span className="max-w-[220px] truncate text-xs text-text-muted">
+              <span className="max-w-[220px] truncate text-xs leading-none text-text-muted">
                 {state.vaultName}
               </span>
             )}
@@ -85,11 +126,7 @@ export default function Home() {
               title="History"
               aria-label="History"
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-4 w-4">
-                <path d="M3 12a9 9 0 1 0 3-6.7" />
-                <path d="M3 4v4h4" />
-                <path d="M12 7v5l3 2" />
-              </svg>
+              <History className="h-4 w-4" strokeWidth={1.8} />
             </button>
             <button
               onClick={actions.toggleSettings}
@@ -101,10 +138,7 @@ export default function Home() {
               title="Settings"
               aria-label="Settings"
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-4 w-4">
-                <circle cx="12" cy="12" r="3" />
-                <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.05.05a2 2 0 1 1-2.83 2.83l-.05-.05a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.54V21a2 2 0 1 1-4 0v-.08a1.7 1.7 0 0 0-1-1.54 1.7 1.7 0 0 0-1.87.34l-.05.05a2 2 0 1 1-2.83-2.83l.05-.05a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.54-1H3a2 2 0 1 1 0-4h.08a1.7 1.7 0 0 0 1.54-1 1.7 1.7 0 0 0-.34-1.87l-.05-.05a2 2 0 1 1 2.83-2.83l.05.05a1.7 1.7 0 0 0 1.87.34h.01a1.7 1.7 0 0 0 1-1.54V3a2 2 0 1 1 4 0v.08a1.7 1.7 0 0 0 1 1.54h.01a1.7 1.7 0 0 0 1.87-.34l.05-.05a2 2 0 1 1 2.83 2.83l-.05.05a1.7 1.7 0 0 0-.34 1.87v.01a1.7 1.7 0 0 0 1.54 1H21a2 2 0 1 1 0 4h-.08a1.7 1.7 0 0 0-1.54 1z" />
-              </svg>
+              <Settings className="h-4 w-4" strokeWidth={1.8} />
             </button>
           </div>
         </header>
@@ -161,6 +195,15 @@ export default function Home() {
           onReindex={actions.handleReindex}
         />
       </div>
+
+      {/* Toast */}
+      {toastMessage && (
+        <div className="animate-fade-in pointer-events-none fixed inset-x-0 top-4 z-50 flex justify-center">
+          <div className="pointer-events-auto rounded-xl border border-warning/25 bg-warning/10 px-4 py-2.5 text-xs text-warning shadow-lg shadow-warning/10 backdrop-blur-md">
+            {toastMessage}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

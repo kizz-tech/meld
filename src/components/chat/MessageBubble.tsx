@@ -2,7 +2,9 @@
 
 import {
   memo,
+  useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -11,6 +13,21 @@ import {
 } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import {
+  Lightbulb,
+  Search,
+  FileText,
+  FilePlus,
+  FilePen,
+  Globe,
+  Circle,
+  ChevronDown,
+  Pencil,
+  Check,
+  Copy,
+  RefreshCw,
+  MoreVertical,
+} from "lucide-react";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import { openFileExternal } from "@/lib/tauri";
 import {
@@ -352,54 +369,22 @@ function TimelineRowIcon({ row }: { row: UnifiedTimelineRow }) {
   const cls = "h-3.5 w-3.5 shrink-0";
 
   if (row.kind === "thinking") {
-    return (
-      <svg viewBox="0 0 16 16" fill="currentColor" className={`${cls} text-text-muted`}>
-        <path d="M8 1a5 5 0 0 0-3.5 8.57V12a1 1 0 0 0 1 1h5a1 1 0 0 0 1-1V9.57A5 5 0 0 0 8 1Zm-1.5 13a.5.5 0 0 0 0 1h3a.5.5 0 0 0 0-1h-3Z" />
-      </svg>
-    );
+    return <Lightbulb className={`${cls} text-text-muted`} strokeWidth={1.5} />;
   }
 
   switch (row.tool) {
     case "kb_search":
-      return (
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} className={`${cls} text-text-muted`}>
-          <circle cx="7" cy="7" r="4.5" />
-          <path d="M10.5 10.5 14 14" strokeLinecap="round" />
-        </svg>
-      );
+      return <Search className={`${cls} text-text-muted`} strokeWidth={1.5} />;
     case "kb_read":
-      return (
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} className={`${cls} text-text-muted`}>
-          <path d="M3 2.5h7l3 3V13a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 3 13V2.5Z" />
-          <path d="M10 2.5v3h3" />
-        </svg>
-      );
+      return <FileText className={`${cls} text-text-muted`} strokeWidth={1.5} />;
     case "kb_create":
-      return (
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} className={`${cls} text-success/70`}>
-          <path d="M3 2.5h7l3 3V13a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 3 13V2.5Z" />
-          <path d="M8 6v5M5.5 8.5h5" strokeLinecap="round" />
-        </svg>
-      );
+      return <FilePlus className={`${cls} text-success/70`} strokeWidth={1.5} />;
     case "kb_update":
-      return (
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} className={`${cls} text-text-muted`}>
-          <path d="M11.5 2.5 13.5 4.5 6 12H4v-2l7.5-7.5Z" strokeLinejoin="round" />
-        </svg>
-      );
+      return <FilePen className={`${cls} text-text-muted`} strokeWidth={1.5} />;
     case "web_search":
-      return (
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} className={`${cls} text-text-muted`}>
-          <circle cx="8" cy="8" r="6" />
-          <path d="M2 8h12M8 2c-2 2.5-2 9 0 12M8 2c2 2.5 2 9 0 12" />
-        </svg>
-      );
+      return <Globe className={`${cls} text-text-muted`} strokeWidth={1.5} />;
     default:
-      return (
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} className={`${cls} text-text-muted/60`}>
-          <circle cx="8" cy="8" r="2" fill="currentColor" />
-        </svg>
-      );
+      return <Circle className={`${cls} text-text-muted/60`} strokeWidth={1.5} />;
   }
 }
 
@@ -565,19 +550,12 @@ function TimelineDisplay({
             </span>
           </div>
         )}
-        <svg
-          viewBox="0 0 16 16"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={2}
-          strokeLinecap="round"
-          strokeLinejoin="round"
+        <ChevronDown
           className={`h-3 w-3 shrink-0 text-text-muted/60 transition-transform ${
             expanded ? "rotate-180" : ""
           }`}
-        >
-          <path d="M4 6l4 4 4-4" />
-        </svg>
+          strokeWidth={2}
+        />
       </div>
 
       {expanded && rows.length > 0 && (
@@ -675,7 +653,22 @@ function MessageBubble({
   const [copied, setCopied] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [showTechMenu, setShowTechMenu] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const techMenuRef = useRef<HTMLDivElement | null>(null);
+  const editTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const isLongUserMessage = isUser && message.content.length > 300;
+
+  const resizeEditTextarea = useCallback(() => {
+    const el = editTextareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 400)}px`;
+  }, []);
+
+  useLayoutEffect(() => {
+    if (isEditing) resizeEditTextarea();
+  }, [isEditing, draftText, resizeEditTextarea]);
 
   const markdownContent = useMemo(
     () => transformWikilinks(message.content),
@@ -785,9 +778,7 @@ function MessageBubble({
             setIsEditing(true);
           }}
         >
-          <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5">
-            <path d="M13.586 3.586a2 2 0 112.828 2.828l-8.56 8.56a1 1 0 01-.447.263l-3 1a1 1 0 01-1.264-1.264l1-3a1 1 0 01.263-.447l8.56-8.56z" />
-          </svg>
+          <Pencil className="h-3.5 w-3.5" />
         </IconButton>
       )}
 
@@ -799,18 +790,9 @@ function MessageBubble({
           }}
         >
           {copied ? (
-            <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5">
-              <path
-                fillRule="evenodd"
-                d="M16.704 5.29a1 1 0 00-1.408-1.418L8.08 11.057 4.704 7.67a1 1 0 10-1.408 1.418l4.08 4.09a1 1 0 001.417 0l7.91-7.888z"
-                clipRule="evenodd"
-              />
-            </svg>
+            <Check className="h-3.5 w-3.5" />
           ) : (
-            <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5">
-              <path d="M5 4a2 2 0 012-2h6a2 2 0 012 2v8a2 2 0 01-2 2H7a2 2 0 01-2-2V4z" />
-              <path d="M3 6a1 1 0 00-1 1v9a2 2 0 002 2h7a1 1 0 100-2H4V7a1 1 0 00-1-1z" />
-            </svg>
+            <Copy className="h-3.5 w-3.5" />
           )}
         </IconButton>
       )}
@@ -824,18 +806,7 @@ function MessageBubble({
             );
           }}
         >
-          <svg
-            viewBox="0 0 20 20"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={1.65}
-            className="h-3.5 w-3.5"
-          >
-            <path d="M3.5 8.5a6.5 6.5 0 0111.7-2.7" strokeLinecap="round" />
-            <path d="M14.8 2.6v3.7h-3.7" strokeLinecap="round" />
-            <path d="M16.5 11.5a6.5 6.5 0 01-11.7 2.7" strokeLinecap="round" />
-            <path d="M5.2 17.4v-3.7h3.7" strokeLinecap="round" />
-          </svg>
+          <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.65} />
         </IconButton>
       )}
 
@@ -845,9 +816,7 @@ function MessageBubble({
             title="Technical actions"
             onClick={() => setShowTechMenu((prev) => !prev)}
           >
-            <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5">
-              <path d="M10 4.75a1.25 1.25 0 110-2.5 1.25 1.25 0 010 2.5zM10 11.25a1.25 1.25 0 110-2.5 1.25 1.25 0 010 2.5zM8.75 16a1.25 1.25 0 102.5 0 1.25 1.25 0 00-2.5 0z" />
-            </svg>
+            <MoreVertical className="h-3.5 w-3.5" />
           </IconButton>
 
           {showTechMenu && (
@@ -902,15 +871,17 @@ function MessageBubble({
         {/* Message content */}
         <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
           {isEditing ? (
-            <div className="max-w-[75%] space-y-2 rounded-2xl border border-white/[0.06] bg-white/[0.05] px-4 py-3">
+            <div className={isUser ? "ml-auto w-full max-w-[85%]" : "w-full max-w-[85%]"}>
               <textarea
+                ref={editTextareaRef}
                 value={draftText}
                 onChange={(event) => setDraftText(event.target.value)}
-                rows={4}
+                rows={1}
+                style={{ maxHeight: 400 }}
                 disabled={savingEdit}
-                className="w-full resize-y rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-text outline-none focus-visible:border-white/[0.12]"
+                className="w-full resize-none overflow-y-auto rounded-2xl border border-white/[0.08] bg-white/[0.05] px-4 py-3 text-sm leading-relaxed text-text outline-none transition-colors focus-visible:border-border-focus focus-visible:shadow-[0_0_0_1px_var(--color-border-focus)]"
               />
-              <div className="flex items-center justify-end gap-1.5">
+              <div className="mt-2 flex items-center justify-end gap-1.5">
                 <button
                   type="button"
                   onClick={() => {
@@ -935,10 +906,27 @@ function MessageBubble({
               </div>
             </div>
           ) : isUser ? (
-            <div className="max-w-[75%] rounded-2xl border border-white/[0.06] bg-white/[0.05] px-4 py-3">
-              <p className="whitespace-pre-wrap text-sm leading-relaxed text-text">
+            <div className="max-w-[85%] rounded-2xl border border-white/[0.06] bg-white/[0.05] px-4 py-3">
+              <div
+                className={`whitespace-pre-wrap text-sm leading-relaxed text-text ${
+                  isLongUserMessage && collapsed ? "line-clamp-6" : ""
+                }`}
+              >
                 {message.content}
-              </p>
+              </div>
+              {isLongUserMessage && (
+                <button
+                  type="button"
+                  onClick={() => setCollapsed((prev) => !prev)}
+                  className="mt-1.5 flex items-center gap-1 text-[11px] text-text-muted transition-colors hover:text-text-secondary"
+                >
+                  <ChevronDown
+                    className={`h-3 w-3 transition-transform ${collapsed ? "" : "rotate-180"}`}
+                    strokeWidth={2}
+                  />
+                  {collapsed ? "Show more" : "Collapse"}
+                </button>
+              )}
             </div>
           ) : (
             <div

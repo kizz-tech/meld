@@ -67,6 +67,8 @@ impl Default for ProviderRegistry {
         registry.register_llm(Box::new(OpenRouterLlmProvider));
         registry.register_llm(Box::new(AnthropicLlmProvider));
         registry.register_llm(Box::new(GoogleLlmProvider));
+        registry.register_llm(Box::new(OllamaLlmProvider));
+        registry.register_llm(Box::new(LmStudioLlmProvider));
 
         registry.register_embedding(Box::new(OpenAiEmbeddingProvider));
         registry.register_embedding(Box::new(GoogleEmbeddingProvider));
@@ -165,6 +167,8 @@ fn provider_display_name(provider_id: &str) -> String {
         "openrouter" => "OpenRouter".to_string(),
         "anthropic" => "Anthropic".to_string(),
         "google" => "Google Gemini".to_string(),
+        "ollama" => "Ollama".to_string(),
+        "lm_studio" => "LM Studio".to_string(),
         "tavily" => "Tavily".to_string(),
         _ => provider_id.to_string(),
     }
@@ -242,6 +246,8 @@ struct OpenAiLlmProvider;
 struct OpenRouterLlmProvider;
 struct AnthropicLlmProvider;
 struct GoogleLlmProvider;
+struct OllamaLlmProvider;
+struct LmStudioLlmProvider;
 struct OpenAiEmbeddingProvider;
 struct GoogleEmbeddingProvider;
 
@@ -317,6 +323,48 @@ impl LlmProvider for GoogleLlmProvider {
                 request.messages,
                 request.tools,
                 request.tx,
+            )
+            .await
+        })
+    }
+}
+
+impl LlmProvider for OllamaLlmProvider {
+    fn id(&self) -> &str {
+        "ollama"
+    }
+
+    fn chat<'a>(&'a self, request: ChatRequest<'a>) -> BoxFuture<'a, Result<(), DynError>> {
+        Box::pin(async move {
+            llm::providers::openai::chat_stream_with_endpoint(
+                request.api_key,
+                request.model,
+                request.messages,
+                request.tools,
+                request.tx,
+                "http://localhost:11434/v1/chat/completions",
+                "Ollama",
+            )
+            .await
+        })
+    }
+}
+
+impl LlmProvider for LmStudioLlmProvider {
+    fn id(&self) -> &str {
+        "lm_studio"
+    }
+
+    fn chat<'a>(&'a self, request: ChatRequest<'a>) -> BoxFuture<'a, Result<(), DynError>> {
+        Box::pin(async move {
+            llm::providers::openai::chat_stream_with_endpoint(
+                request.api_key,
+                request.model,
+                request.messages,
+                request.tools,
+                request.tx,
+                "http://localhost:1234/v1/chat/completions",
+                "LM Studio",
             )
             .await
         })

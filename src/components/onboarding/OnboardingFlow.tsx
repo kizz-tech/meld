@@ -2,7 +2,10 @@
 
 import { useState } from "react";
 import { useAppStore } from "@/lib/store";
+import { open } from "@tauri-apps/plugin-dialog";
 import { selectVault, setApiKey, reindex } from "@/lib/tauri";
+import Select from "@/components/ui/Select";
+import MeldLogo from "@/components/ui/MeldLogo";
 import { setupEventListeners } from "@/lib/events";
 
 type Step = "welcome" | "folder" | "apikey" | "indexing" | "ready";
@@ -55,6 +58,7 @@ export default function OnboardingFlow() {
       <div className="w-full max-w-md p-8 space-y-8">
         {step === "welcome" && (
           <div className="space-y-6 text-center">
+            <MeldLogo size={64} className="mx-auto rounded-2xl" />
             <h1 className="font-display text-3xl italic text-accent">meld</h1>
             <p className="text-text-secondary">
               Your personal AI agent with a shared knowledge base.
@@ -75,13 +79,25 @@ export default function OnboardingFlow() {
             <p className="text-text-secondary text-sm">
               Choose the folder containing your markdown notes.
             </p>
-            <input
-              type="text"
-              value={folderPath}
-              onChange={(e) => setFolderPath(e.target.value)}
-              placeholder="/path/to/your/notes"
-              className="w-full p-3 bg-bg-secondary border border-transparent bg-bg-secondary rounded-xl text-text placeholder:text-text-muted focus:outline-none focus:border-border-focus focus:shadow-[0_0_0_1px_var(--color-border-focus)]"
-            />
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={folderPath}
+                onChange={(e) => setFolderPath(e.target.value)}
+                placeholder="/path/to/your/notes"
+                className="flex-1 p-3 bg-bg-secondary border border-border/50 rounded-xl text-text placeholder:text-text-muted focus:outline-none focus:border-border-focus focus:shadow-[0_0_0_1px_var(--color-border-focus)]"
+              />
+              <button
+                type="button"
+                onClick={async () => {
+                  const selected = await open({ directory: true, multiple: false });
+                  if (selected) setFolderPath(selected);
+                }}
+                className="px-4 py-3 bg-bg-secondary rounded-xl text-text-muted hover:text-text transition-colors whitespace-nowrap"
+              >
+                Browse
+              </button>
+            </div>
             {error && <p className="text-error text-sm">{error}</p>}
             <button
               onClick={handleSelectFolder}
@@ -99,21 +115,21 @@ export default function OnboardingFlow() {
             <p className="text-text-secondary text-sm">
               meld uses your own API key. Choose a provider and enter your key.
             </p>
-            <select
+            <Select
               value={provider}
-              onChange={(e) => setProvider(e.target.value)}
-              className="w-full p-3 bg-bg-secondary border border-transparent bg-bg-secondary rounded-xl text-text focus:outline-none focus:border-border-focus focus:shadow-[0_0_0_1px_var(--color-border-focus)]"
-            >
-              <option value="openai">OpenAI</option>
-              <option value="anthropic">Anthropic</option>
-              <option value="google">Google</option>
-            </select>
+              onChange={setProvider}
+              options={[
+                { value: "openai", label: "OpenAI" },
+                { value: "anthropic", label: "Anthropic" },
+                { value: "google", label: "Google" },
+              ]}
+            />
             <input
               type="password"
               value={apiKey}
               onChange={(e) => setApiKeyValue(e.target.value)}
               placeholder="sk-..."
-              className="w-full p-3 bg-bg-secondary border border-transparent bg-bg-secondary rounded-xl text-text placeholder:text-text-muted focus:outline-none focus:border-border-focus focus:shadow-[0_0_0_1px_var(--color-border-focus)]"
+              className="w-full p-3 bg-bg-secondary border border-border/50 rounded-xl text-text placeholder:text-text-muted focus:outline-none focus:border-border-focus focus:shadow-[0_0_0_1px_var(--color-border-focus)]"
             />
             {error && <p className="text-error text-sm">{error}</p>}
             <button

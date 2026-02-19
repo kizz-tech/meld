@@ -51,6 +51,7 @@ pub fn run() {
             commands::vault::create_folder,
             commands::vault::archive_vault_entry,
             commands::vault::move_vault_entry,
+            commands::dev::open_devtools,
         ])
         .run(tauri::generate_context!())
         .expect("error while running meld");

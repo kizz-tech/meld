@@ -29,7 +29,6 @@ import {
   reorderConversations,
   reindex,
   renameConversation,
-  resolveOrCreateNote,
   sendMessage,
   unarchiveConversation,
   unpinConversation,
@@ -324,6 +323,11 @@ export function useHomeController() {
 
   const handleSelectConversation = useCallback(
     async (conversationId: Conversation["id"]) => {
+      // Close Settings/History when selecting a chat
+      const s = useAppStore.getState();
+      if (s.showSettings) s.toggleSettings();
+      if (s.showHistory) s.toggleHistory();
+
       setActiveConversation(conversationId);
       try {
         const result = await getConversationMessages(conversationId);
@@ -368,20 +372,18 @@ export function useHomeController() {
         return;
       }
 
-      try {
-        const createdPath = await resolveOrCreateNote(normalized);
-        setViewMode("files");
-        openNote(createdPath);
-        void loadVaultFiles({ silent: true });
-      } catch (error) {
-        console.error("Failed to resolve or create wikilink note:", error);
-      }
+      useAppStore.getState().showToast(`Note "${normalized}" not found`);
     },
     [loadVaultFiles, openNote, setViewMode],
   );
 
   const handleSelectNote = useCallback(
     (path: string) => {
+      // Close Settings/History when selecting a note
+      const s = useAppStore.getState();
+      if (s.showSettings) s.toggleSettings();
+      if (s.showHistory) s.toggleHistory();
+
       clearTimeout(selectNoteTimerRef.current);
       selectNoteTimerRef.current = setTimeout(() => {
         void resolveAndOpenNote(path);

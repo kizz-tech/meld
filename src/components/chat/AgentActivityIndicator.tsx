@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { Loader2, Check } from "lucide-react";
 import { useAppStore, type AgentActivity } from "@/lib/store";
 
 interface Props {
@@ -175,26 +176,10 @@ export default function AgentActivityIndicator({ activity }: Props) {
           </span>
         )}
         {icon === "tool" && (
-          <svg
-            className="w-3.5 h-3.5 text-text-muted animate-spin"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
-            <path d="M12 2v4m0 12v4m-7.07-3.93l2.83-2.83m8.48-8.48l2.83-2.83M2 12h4m12 0h4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83" />
-          </svg>
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-text-muted" strokeWidth={2} />
         )}
         {icon === "verify" && (
-          <svg
-            className="w-3.5 h-3.5 text-success/80"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
-            <path d="M5 13l4 4L19 7" />
-          </svg>
+          <Check className="h-3.5 w-3.5 text-success/80" strokeWidth={2} />
         )}
         <span key={label} className="truncate max-w-[520px] animate-fade-in">
           {label}

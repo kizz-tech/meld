@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { RunEventPayload, RunTokenUsagePayload } from "@/lib/tauri";
+import Select from "@/components/ui/Select";
 
 interface RunTracePanelProps {
   runId: string;
@@ -447,31 +448,25 @@ export default function RunTracePanel({
           )}
 
           <div className="grid grid-cols-1 gap-1.5 md:grid-cols-4">
-            <select
+            <Select
               value={channelFilter}
-              onChange={(event) => setChannelFilter(event.target.value)}
-              className="rounded-lg border border-border/60 bg-bg-secondary/70 px-2 py-1 text-[11px] text-text-muted focus-visible:border-border-hover focus:outline-none"
-            >
-              <option value="all">All channels</option>
-              {availableChannels.map((channel) => (
-                <option key={channel} value={channel}>
-                  {channel}
-                </option>
-              ))}
-            </select>
+              onChange={setChannelFilter}
+              size="sm"
+              options={[
+                { value: "all", label: "All channels" },
+                ...availableChannels.map((ch) => ({ value: ch, label: ch })),
+              ]}
+            />
 
-            <select
+            <Select
               value={typeFilter}
-              onChange={(event) => setTypeFilter(event.target.value)}
-              className="rounded-lg border border-border/60 bg-bg-secondary/70 px-2 py-1 text-[11px] text-text-muted focus-visible:border-border-hover focus:outline-none"
-            >
-              <option value="all">All event types</option>
-              {availableEventTypes.map((eventType) => (
-                <option key={eventType} value={eventType}>
-                  {eventType}
-                </option>
-              ))}
-            </select>
+              onChange={setTypeFilter}
+              size="sm"
+              options={[
+                { value: "all", label: "All event types" },
+                ...availableEventTypes.map((t) => ({ value: t, label: t })),
+              ]}
+            />
 
             <input
               value={query}

@@ -17,8 +17,8 @@ impl Default for RunBudget {
             max_iterations: 15,
             max_tool_calls: 30,
             token_budget: None,
-            time_budget_ms: 120_000,
-            llm_response_timeout_ms: 45_000,
+            time_budget_ms: 300_000,
+            llm_response_timeout_ms: 180_000,
         }
     }
 }
@@ -65,7 +65,10 @@ pub(super) fn budget_timeout_reason(
 
 pub(super) fn approximate_model_context_limit(model: &str) -> u64 {
     let normalized = model.to_ascii_lowercase();
-    if normalized.contains("gemini-2.5") || normalized.contains("gemini-1.5") {
+    if normalized.contains("gemini-2.5")
+        || normalized.contains("gemini-3")
+        || normalized.contains("gemini-1.5")
+    {
         1_000_000
     } else if normalized.contains("claude") {
         200_000
@@ -74,6 +77,8 @@ pub(super) fn approximate_model_context_limit(model: &str) -> u64 {
         || normalized.contains("gpt-4o")
     {
         128_000
+    } else if normalized.contains("qwen") {
+        131_072
     } else {
         64_000
     }

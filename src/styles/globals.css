@@ -40,21 +40,27 @@ body::before {
   background-size: 200px 200px;
 }
 
-/* Scrollbar */
+/* Scrollbar — hidden globally; panels that need a visible scrollbar
+   can opt in with .scrollbar-visible */
 ::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.scrollbar-visible::-webkit-scrollbar {
   width: 4px;
 }
 
-::-webkit-scrollbar-track {
+.scrollbar-visible::-webkit-scrollbar-track {
   background: transparent;
 }
 
-::-webkit-scrollbar-thumb {
+.scrollbar-visible::-webkit-scrollbar-thumb {
   background: var(--color-border);
   border-radius: 3px;
 }
 
-::-webkit-scrollbar-thumb:hover {
+.scrollbar-visible::-webkit-scrollbar-thumb:hover {
   background: var(--color-text-muted);
 }
 

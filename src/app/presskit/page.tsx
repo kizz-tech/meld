@@ -7,6 +7,7 @@ import ChatView from "@/components/chat/ChatView";
 import Sidebar from "@/components/sidebar/Sidebar";
 import NotePreview from "@/components/vault/NotePreview";
 import StatusBar from "@/components/ui/StatusBar";
+import MeldLogo from "@/components/ui/MeldLogo";
 import {
   useAppStore,
   type Conversation,
@@ -405,11 +406,9 @@ function WorkspaceFrame({ scene }: { scene: Exclude<PresskitScene, "onboarding">
 
         <header className="relative z-10 flex items-center justify-between border-b border-border/20 px-5 py-3">
           <div className="flex items-center gap-2.5">
-            <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-accent/14 text-xs font-semibold text-accent">
-              M
-            </span>
-            <h1 className="font-display text-[15px] italic tracking-tight text-text">meld</h1>
-            <span className="max-w-[260px] truncate text-xs text-text-muted">~/notes</span>
+            <MeldLogo size={24} className="shrink-0 rounded-md" />
+            <h1 className="-translate-y-[1px] font-display text-[15px] italic leading-none tracking-tight text-text">meld</h1>
+            <span className="max-w-[260px] truncate text-xs leading-none text-text-muted">~/notes</span>
           </div>
           <div className="text-xs text-text-muted">{SCENE_LABELS[scene]}</div>
         </header>

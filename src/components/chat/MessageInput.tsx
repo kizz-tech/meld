@@ -1,11 +1,14 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useLayoutEffect } from "react";
+import { SendHorizonal } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { useAppStore } from "@/lib/store";
 import { selectMessageInputState } from "@/state/selectors";
 import { cancelActiveRun, sendMessage } from "@/lib/tauri";
 import { collectSourcesFromToolResults } from "@/lib/events";
+
+const MAX_TEXTAREA_HEIGHT = 240;
 
 interface MessageInputProps {
   onSendMessage?: (message: string) => Promise<void> | void;
@@ -23,6 +26,17 @@ export default function MessageInput({
   const { isStreaming, streamSuppressed, isIndexing, activeConversationId } = useAppStore(
     useShallow(selectMessageInputState),
   );
+
+  const resizeTextarea = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, MAX_TEXTAREA_HEIGHT)}px`;
+  }, []);
+
+  useLayoutEffect(() => {
+    resizeTextarea();
+  }, [input, resizeTextarea]);
 
   const submitMessage = useCallback(async (rawText?: string) => {
     const text = (rawText ?? input).trim();
@@ -161,7 +175,8 @@ export default function MessageInput({
                 : "Ask about your notes..."
           }
           rows={1}
-          className="min-h-[46px] flex-1 resize-none rounded-2xl border border-white/[0.04] bg-white/[0.04] px-4 py-3 text-sm leading-relaxed text-text placeholder:text-text-muted/70 outline-none transition-all duration-[120ms] focus-visible:bg-white/[0.06] focus-visible:shadow-[0_0_0_1px_var(--color-border-focus)]"
+          style={{ maxHeight: MAX_TEXTAREA_HEIGHT }}
+          className="flex-1 resize-none overflow-y-auto rounded-2xl border border-white/[0.04] bg-white/[0.04] px-4 py-3 text-sm leading-relaxed text-text placeholder:text-text-muted/70 outline-none transition-[background,box-shadow] duration-[120ms] focus-visible:bg-white/[0.06] focus-visible:shadow-[0_0_0_1px_var(--color-border-focus)]"
           disabled={isIndexing || isStreaming || streamSuppressed}
         />
 
@@ -186,14 +201,7 @@ export default function MessageInput({
             className="flex h-[48px] w-[48px] items-center justify-center rounded-2xl bg-accent/15 text-accent transition-all duration-[120ms] hover:bg-accent/22 disabled:cursor-not-allowed disabled:opacity-40"
             title="Send message"
           >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-              className="h-5 w-5"
-            >
-              <path d="M3.105 2.289a.75.75 0 00-.826.95l1.414 4.925A1.5 1.5 0 005.135 9.25h6.115a.75.75 0 010 1.5H5.135a1.5 1.5 0 00-1.442 1.086l-1.414 4.926a.75.75 0 00.826.95 28.896 28.896 0 0015.293-7.154.75.75 0 000-1.115A28.897 28.897 0 003.105 2.289z" />
-            </svg>
+            <SendHorizonal className="h-5 w-5" />
           </button>
         )}
       </div>

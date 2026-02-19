@@ -32,7 +32,7 @@ export default function TreeSurface({
   return (
     <div
       className={joinClasses(
-        "relative h-full min-h-0 overflow-x-hidden overflow-y-auto",
+        "relative h-full min-h-0 overflow-x-hidden overflow-y-auto scrollbar-visible",
         className,
       )}
       onContextMenu={onRootContextMenu}

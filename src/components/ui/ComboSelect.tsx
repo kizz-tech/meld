@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { ChevronDown } from "lucide-react";
 
 export interface ComboOption {
   value: string;
   label: string;
+  badge?: string;
 }
 
 interface ComboSelectProps {
@@ -76,10 +78,10 @@ export default function ComboSelect({
   return (
     <div ref={containerRef} className="relative">
       <div
-        className={`flex items-center rounded-xl border bg-bg text-sm transition-colors ${
+        className={`flex items-center rounded-xl border text-sm transition-colors ${
           focused
-            ? "border-border-focus shadow-[0_0_0_1px_var(--color-border-focus)]"
-            : "border-transparent"
+            ? "border-border-focus bg-bg shadow-[0_0_0_1px_var(--color-border-focus)]"
+            : "border-border/50 bg-white/[0.03]"
         }`}
       >
         <input
@@ -91,10 +93,13 @@ export default function ComboSelect({
             setQuery(e.target.value);
             if (!open) setOpen(true);
           }}
-          onFocus={() => {
+          onFocus={(e) => {
             setFocused(true);
             setOpen(true);
-            setQuery("");
+            const current = displayValue();
+            setQuery(current);
+            // Select all text so typing replaces it
+            requestAnimationFrame(() => e.target.select());
           }}
           onBlur={() => {
             setFocused(false);
@@ -133,16 +138,7 @@ export default function ComboSelect({
           }}
           className="shrink-0 px-2 text-text-muted/60 hover:text-text-secondary transition-colors"
         >
-          <svg
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2}
-            strokeLinecap="round"
-            className={`h-3 w-3 transition-transform ${open ? "rotate-180" : ""}`}
-          >
-            <path d="M4 6l4 4 4-4" />
-          </svg>
+          <ChevronDown className={`h-3 w-3 transition-transform ${open ? "rotate-180" : ""}`} strokeWidth={2} />
         </button>
       </div>
 
@@ -166,7 +162,12 @@ export default function ComboSelect({
               }`}
             >
               <span className="flex-1 truncate">{o.label}</span>
-              {o.value !== o.label && (
+              {o.badge && (
+                <span className="ml-2 shrink-0 rounded-md bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent">
+                  {o.badge}
+                </span>
+              )}
+              {o.value !== o.label && !o.badge && (
                 <span className="ml-2 shrink-0 text-[10px] font-mono text-text-muted/50">
                   {o.value}
                 </span>

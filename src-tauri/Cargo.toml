@@ -1,6 +1,6 @@
 [package]
 name = "meld"
-version = "0.1.0"
+version = "0.2.0"
 description = "Superpersonalized AI agent with a shared knowledge base"
 authors = ["kizz-tech"]
 license = "AGPL-3.0"
@@ -18,7 +18,7 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["devtools"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-updater = "2"
@@ -48,3 +48,4 @@ notify-debouncer-full = "0.7"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
+devtools = ["tauri/devtools"]

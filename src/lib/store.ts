@@ -174,6 +174,11 @@ export interface AppState {
     p: { current: number; total: number; file: string } | null,
   ) => void;
 
+  // Toast
+  toastMessage: string | null;
+  showToast: (message: string) => void;
+  clearToast: () => void;
+
   // Actions — config
   setChatProvider: (provider: string) => void;
   setChatModel: (model: string) => void;
@@ -329,6 +334,11 @@ export const useAppStore = create<AppState>((set) => ({
   // Indexing
   setIndexing: (v) => set({ isIndexing: v }),
   setIndexProgress: (p) => set({ indexProgress: p }),
+
+  // Toast
+  toastMessage: null,
+  showToast: (message) => set({ toastMessage: message }),
+  clearToast: () => set({ toastMessage: null }),
 
   // Config
   setChatProvider: (provider) => set({ chatProvider: provider }),

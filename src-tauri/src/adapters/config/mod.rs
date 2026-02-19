@@ -2,6 +2,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+/// Bump this when adding new fields with non-trivial defaults.
+/// When a loaded config has a lower version, it is re-saved to disk
+/// so that users see the new keys in their `config.toml`.
+const CURRENT_CONFIG_VERSION: u32 = 1;
+
 fn default_retrieval_rerank_enabled() -> bool {
     true
 }
@@ -25,7 +30,9 @@ pub struct OauthTokenConfig {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(default)]
 pub struct Settings {
+    pub config_version: u32,
     pub vault_path: Option<String>,
     pub user_language: Option<String>,
     pub chat_provider: Option<String>,
@@ -80,6 +87,7 @@ impl VaultConfig {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            config_version: 0,
             vault_path: None,
             user_language: None,
             chat_provider: Some("openai".to_string()),
@@ -196,11 +204,35 @@ impl Settings {
         let path = Self::global_config_path();
         if path.exists() {
             let content = std::fs::read_to_string(&path).unwrap_or_default();
-            let mut settings: Self = toml::from_str(&content).unwrap_or_default();
+            let mut settings: Self = match toml::from_str(&content) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!(
+                        "[config] Failed to parse {}: {e}. Using defaults.",
+                        path.display()
+                    );
+                    Self::default()
+                }
+            };
             settings.hydrate_legacy_api_keys();
+
+            // Re-save when config is from an older version so new fields
+            // (with their defaults) appear in the file on disk.
+            if settings.config_version < CURRENT_CONFIG_VERSION {
+                settings.config_version = CURRENT_CONFIG_VERSION;
+                if let Err(e) = settings.save() {
+                    eprintln!(
+                        "[config] Failed to migrate config to v{CURRENT_CONFIG_VERSION}: {e}"
+                    );
+                }
+            }
+
             settings
         } else {
-            Self::default()
+            Self {
+                config_version: CURRENT_CONFIG_VERSION,
+                ..Self::default()
+            }
         }
     }
 
@@ -741,5 +773,68 @@ mod tests {
             Some("anthropic:claude-sonnet-4-6".to_string())
         );
         let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[test]
+    fn old_config_without_version_gets_defaults_on_deserialize() {
+        // Simulates an old config.toml that has no config_version field.
+        // serde(default) should set config_version to 0 (u32 default).
+        let toml_str = r#"
+vault_path = "/tmp/vault"
+"#;
+        let settings: Settings = toml::from_str(toml_str).expect("parse old config");
+        assert_eq!(settings.config_version, 0);
+        assert_eq!(settings.vault_path, Some("/tmp/vault".to_string()));
+        // New fields should have their defaults:
+        assert_eq!(settings.chat_provider, Some("openai".to_string()));
+        assert_eq!(settings.chat_model, Some("gpt-5.2".to_string()));
+        assert!(settings.retrieval_rerank_enabled);
+        assert_eq!(settings.retrieval_rerank_top_k, 8);
+    }
+
+    #[test]
+    fn default_settings_have_zero_config_version_for_serde() {
+        // Default::default() returns version 0 so that serde fills missing
+        // config_version as 0 (triggers migration). load_global() bumps it.
+        let settings = Settings::default();
+        assert_eq!(settings.config_version, 0);
+    }
+
+    #[test]
+    fn save_and_reload_preserves_config_version() {
+        let dir =
+            std::env::temp_dir().join(format!("meld-config-ver-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+
+        let config_path = dir.join("config.toml");
+
+        // Write a v0 config (no config_version field)
+        std::fs::write(
+            &config_path,
+            "vault_path = \"/tmp/vault\"\nopenai_api_key = \"sk-test\"\n",
+        )
+        .expect("write old config");
+
+        // Parse it
+        let content = std::fs::read_to_string(&config_path).expect("read");
+        let mut settings: Settings = toml::from_str(&content).expect("parse");
+        assert_eq!(settings.config_version, 0);
+
+        // Simulate the migration: bump version and re-save
+        settings.config_version = super::CURRENT_CONFIG_VERSION;
+        let serialized = toml::to_string_pretty(&settings).expect("serialize");
+        std::fs::write(&config_path, &serialized).expect("write migrated");
+
+        // Reload and verify
+        let content2 = std::fs::read_to_string(&config_path).expect("read migrated");
+        let reloaded: Settings = toml::from_str(&content2).expect("parse migrated");
+        assert_eq!(reloaded.config_version, super::CURRENT_CONFIG_VERSION);
+        assert_eq!(reloaded.vault_path, Some("/tmp/vault".to_string()));
+        assert_eq!(reloaded.openai_api_key, Some("sk-test".to_string()));
+        // Check that new defaults are present in the serialized content
+        assert!(content2.contains("config_version"));
+        assert!(content2.contains("retrieval_rerank_enabled"));
+
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

@@ -399,3 +399,9 @@ export async function revertCommit(commitId: string): Promise<void> {
 export async function openFileExternal(path: string): Promise<void> {
   return invoke("open_file_external", { path });
 }
+
+/* ── Dev ───────────────────────────────────────────────── */
+
+export async function openDevtools(): Promise<void> {
+  return invoke("open_devtools");
+}

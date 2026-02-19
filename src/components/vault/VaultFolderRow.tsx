@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { Pin } from "lucide-react";
 import HoverMarqueeText from "./HoverMarqueeText";
 
 export interface VaultFolderHandlers {
@@ -38,20 +39,7 @@ const kbRowDropClass =
   "bg-bg-tertiary/70 text-text";
 
 const PinIcon = () => (
-  <svg
-    viewBox="0 0 24 24"
-    aria-hidden="true"
-    className="h-3.5 w-3.5 shrink-0 text-accent/80"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.8"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <path d="M9 3h6" />
-    <path d="M10 3v4l-3 3v2h10v-2l-3-3V3" />
-    <path d="M12 12v9" />
-  </svg>
+  <Pin className="h-3.5 w-3.5 shrink-0 text-accent/80" strokeWidth={1.8} aria-hidden="true" />
 );
 
 const VaultFolderRow = memo(

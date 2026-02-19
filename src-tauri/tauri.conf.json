@@ -1,12 +1,12 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-cli/config.schema.json",
   "productName": "meld",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "tech.kizz.meld",
   "build": {
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "pnpm dev:next",
     "devUrl": "http://localhost:3000",
-    "beforeBuildCommand": "pnpm build",
+    "beforeBuildCommand": "pnpm build:next",
     "frontendDist": "../out"
   },
   "app": {
@@ -28,6 +28,7 @@
   },
   "plugins": {
     "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEUzMEI1NjIyNjk2NzM3MDMKUldRRE4yZHBJbFlMNDlJSnlleU9QVnJNOTZFbzlFQUhCZCtQVEY1ejJad0gzRzNZQmp1NVRpaVgK",
       "endpoints": [
         "https://github.com/kizz-tech/meld/releases/latest/download/latest.json"
       ]

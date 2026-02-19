@@ -125,13 +125,20 @@ System prompt is composed from layers:
 
 ## Build & Test
 
+All commands go through pnpm. Tauri CLI is a dev dependency — no global install needed.
+
 ```bash
-pnpm install                                    # Install frontend deps
-cargo tauri dev                                 # Dev mode (hot reload)
-cargo tauri build                               # Production build
-cargo test --manifest-path src-tauri/Cargo.toml # Rust tests
-pnpm lint                                       # ESLint
-pnpm typecheck                                  # TypeScript check
+pnpm install        # Install all deps (JS + fetches Rust crates)
+pnpm dev            # Dev mode (Next.js + Tauri window)
+pnpm build          # Production build
+pnpm check          # Run ALL checks (fmt + lint + clippy + test + typecheck)
+pnpm test           # Rust tests only
+pnpm lint           # ESLint only
+pnpm lint:rust      # Clippy only
+pnpm lint:all       # ESLint + Clippy
+pnpm fmt            # Auto-format Rust code
+pnpm fmt:check      # Check Rust formatting
+pnpm typecheck      # TypeScript type check
 ```
 
 ## Conventions
