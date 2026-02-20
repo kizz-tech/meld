@@ -2,14 +2,15 @@
 
 import { useEffect } from "react";
 import { useHomeController } from "@/features/layout/controllers/useHomeController";
-import OnboardingFlow from "@/components/onboarding/OnboardingFlow";
 import ChatView from "@/components/chat/ChatView";
 import Sidebar from "@/components/sidebar/Sidebar";
 import NotePreview from "@/components/vault/NotePreview";
+import VaultQuickSwitcher from "@/components/vault/VaultQuickSwitcher";
+import VaultSwitcherScreen from "@/components/vault/VaultSwitcherScreen";
 import SettingsPanel from "@/components/settings/SettingsPanel";
 import HistoryPanel from "@/components/history/HistoryPanel";
+import FolderSettingsPanel from "@/components/folders/FolderSettingsPanel";
 import StatusBar from "@/components/ui/StatusBar";
-import MeldLogo from "@/components/ui/MeldLogo";
 import MeldMark from "@/components/ui/MeldMark";
 import { useAppStore } from "@/lib/store";
 import WindowControls from "@/components/ui/WindowControls";
@@ -18,7 +19,10 @@ import { History, Settings } from "lucide-react";
 export default function Home() {
   const { state, actions } = useHomeController();
   const toastMessage = useAppStore((s) => s.toastMessage);
+  const toastAction = useAppStore((s) => s.toastAction);
+  const toastDurationMs = useAppStore((s) => s.toastDurationMs);
   const clearToast = useAppStore((s) => s.clearToast);
+  const openSettings = useAppStore((s) => s.openSettings);
 
   // Block devtools shortcuts & native context menu
   useEffect(() => {
@@ -53,25 +57,49 @@ export default function Home() {
 
   useEffect(() => {
     if (!toastMessage) return;
-    const timer = setTimeout(clearToast, 2500);
+    const timeout =
+      toastDurationMs ?? (toastAction === "open_settings" ? 9000 : 2500);
+    const timer = setTimeout(clearToast, timeout);
     return () => clearTimeout(timer);
-  }, [toastMessage, clearToast]);
-
-  if (!state.isOnboarded) {
-    return <OnboardingFlow />;
-  }
+  }, [toastMessage, toastAction, toastDurationMs, clearToast]);
 
   if (state.loading) {
     return (
-      <div className="flex w-full items-center justify-center h-full bg-transparent">
+      <div className="flex h-full w-full items-center justify-center rounded-[28px] bg-bg border border-overlay-6">
         <div className="w-8 h-8 border-2 border-text-muted border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
 
-  const modelId = state.chatModel
-    ? `${state.chatProvider}:${state.chatModel}`
-    : state.chatProvider || "—";
+  if (!state.isOnboarded || state.showVaultSwitcher) {
+    return (
+      <VaultSwitcherScreen
+        onClose={actions.closeVaultSwitcher}
+        canClose={state.isOnboarded && Boolean(state.vaultPath)}
+      />
+    );
+  }
+
+  const modelId = state.activeModelId;
+  const paneToast = toastMessage ? (
+    <div className="animate-fade-in pointer-events-none absolute inset-x-0 top-3 z-40 flex justify-center px-4">
+      <div className="pointer-events-auto flex max-w-[min(92%,680px)] items-center gap-3 rounded-2xl border border-warning/25 bg-warning/10 px-4 py-3 text-xs text-warning shadow-lg shadow-warning/10 backdrop-blur-md">
+        <span className="leading-relaxed">{toastMessage}</span>
+        {toastAction === "open_settings" && (
+          <button
+            type="button"
+            onClick={() => {
+              openSettings();
+              clearToast();
+            }}
+            className="shrink-0 rounded-lg border border-warning/40 bg-warning/15 px-2.5 py-1 text-[11px] font-medium text-warning transition-colors hover:bg-warning/25"
+          >
+            Open Settings
+          </button>
+        )}
+      </div>
+    </div>
+  ) : null;
 
   return (
     <div className="relative flex h-full w-full rounded-[28px] bg-bg border border-overlay-6 overflow-hidden">
@@ -79,6 +107,7 @@ export default function Home() {
       <div className="relative flex h-full shrink-0 flex-col border-r border-overlay-5">
         <Sidebar
           conversations={state.conversations}
+          folders={state.folders}
           activeConversationId={state.activeConversationId}
           vaultEntries={state.vaultEntries}
           loadingVaultFiles={state.loadingVaultFiles}
@@ -92,6 +121,14 @@ export default function Home() {
           onUnarchiveConversation={actions.handleUnarchiveConversation}
           onPinConversation={actions.handlePinConversation}
           onUnpinConversation={actions.handleUnpinConversation}
+          onCreateChatFolder={actions.handleCreateChatFolder}
+          onRenameChatFolder={actions.handleRenameChatFolder}
+          onArchiveChatFolder={actions.handleArchiveChatFolder}
+          onPinChatFolder={actions.handlePinChatFolder}
+          onUnpinChatFolder={actions.handleUnpinChatFolder}
+          onMoveChatFolder={actions.handleMoveChatFolder}
+          onSetConversationFolder={actions.handleSetConversationFolder}
+          onOpenFolderSettings={actions.handleOpenFolderSettings}
           onCreateKbNote={actions.handleCreateKbNote}
           onCreateKbFolder={actions.handleCreateKbFolder}
           onArchiveKbEntry={actions.handleArchiveKbEntry}
@@ -108,20 +145,17 @@ export default function Home() {
 
         {/* Header */}
         <header
-          className="relative z-10 flex h-[44px] items-center justify-between border-b border-overlay-5 px-4 select-none"
+          className="relative z-30 flex h-[44px] items-center justify-between border-b border-overlay-5 px-4 select-none"
         >
-          {/* Drag surface — behind interactive content */}
-          <div data-tauri-drag-region className="absolute inset-0" />
-          <div className="relative z-10 flex items-center gap-2">
+          <div className="relative z-10 flex items-center gap-2 shrink-0">
             <MeldMark className="h-4 w-4" />
-            <span className="font-display italic text-[14px] font-medium text-text-secondary">
-              meld
-            </span>
-            <span className="ml-2 px-2 py-0.5 rounded-lg bg-overlay-5 font-mono text-[10px] text-text-muted">
-              {state.vaultName || "No Vault"}
-            </span>
+            <VaultQuickSwitcher
+              vaultName={state.vaultName || "No Vault"}
+              onManageVaults={actions.openVaultSwitcher}
+            />
           </div>
-          <div className="relative z-10 flex items-center gap-2">
+          <div className="h-full flex-1 min-w-0" />
+          <div className="relative z-10 flex items-center gap-2 shrink-0 pl-2">
             <button
               onClick={actions.toggleHistory}
               className={`flex h-7 w-7 items-center justify-center rounded-xl transition-colors ${state.showHistory
@@ -150,25 +184,40 @@ export default function Home() {
         </header>
 
         {/* Content */}
-        <div className="relative z-10 flex min-h-0 flex-1">
+        <div className="relative z-0 flex min-h-0 flex-1">
           {state.showSettings ? (
-            <div className="flex-1 overflow-y-auto">
+            <div className="relative flex-1 overflow-y-auto">
               <SettingsPanel />
+              {paneToast}
             </div>
           ) : state.showHistory ? (
-            <div className="flex-1 overflow-y-auto">
+            <div className="relative flex-1 overflow-y-auto">
               <HistoryPanel />
+              {paneToast}
+            </div>
+          ) : state.showFolderSettings && state.activeFolderId ? (
+            <div className="relative flex-1 overflow-y-auto">
+              <FolderSettingsPanel
+                folderId={state.activeFolderId}
+                onClose={actions.handleCloseFolderSettings}
+                onFolderArchived={actions.handleFolderArchived}
+                onFolderUpdated={actions.handleFolderUpdated}
+              />
+              {paneToast}
             </div>
           ) : (
             <>
-              <div className="flex-1 min-w-0">
+              <div className="relative flex-1 min-w-0">
                 <ChatView
                   onSendMessage={actions.handleSendMessage}
                   onRegenerateLastResponse={actions.handleRegenerateLastResponse}
                   onEditMessage={actions.handleEditMessage}
                   onDeleteMessage={actions.handleDeleteMessage}
                   onOpenNote={actions.handleOpenNoteFromChat}
+                  chatScopeLabel={state.chatScopeLabel}
+                  isChatScopedToFolder={state.isChatScopedToFolder}
                 />
+                {paneToast}
               </div>
               <aside
                 className={`shrink-0 overflow-hidden bg-scrim-20 transition-[width,border-color] duration-[280ms] ease-out ${
@@ -209,17 +258,6 @@ export default function Home() {
           onReindex={actions.handleReindex}
         />
       </div>
-
-      {/* Toast */}
-      {
-        toastMessage && (
-          <div className="animate-fade-in pointer-events-none fixed inset-x-0 top-4 z-50 flex justify-center">
-            <div className="pointer-events-auto rounded-2xl border border-warning/25 bg-warning/10 px-5 py-3 text-xs text-warning shadow-lg shadow-warning/10 backdrop-blur-md">
-              {toastMessage}
-            </div>
-          </div>
-        )
-      }
-    </div >
+    </div>
   );
 }

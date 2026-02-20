@@ -57,6 +57,7 @@ pub struct InstructionSources {
     pub agents_md: Option<String>,
     pub rules: Option<String>,
     pub hints: Option<String>,
+    pub folder_instructions: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -109,6 +110,19 @@ impl InstructionBuilder {
         if let Some(hints) = sources.hints.as_deref().map(str::trim) {
             if !hints.is_empty() {
                 blocks.push(format!("Hints (guidance):\n{hints}"));
+            }
+        }
+
+        if !sources.folder_instructions.is_empty() {
+            let merged = sources
+                .folder_instructions
+                .iter()
+                .filter(|s| !s.trim().is_empty())
+                .map(|s| s.trim())
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            if !merged.is_empty() {
+                blocks.push(format!("Project context (folder instructions):\n{merged}"));
             }
         }
 
@@ -173,7 +187,7 @@ mod tests {
             date: "2026-02-15 09:00".to_string(),
             vault_path: "/tmp/vault".to_string(),
             note_count: 7,
-            user_language: Some("Russian".to_string()),
+            user_language: Some("English".to_string()),
             provider: "openai".to_string(),
             model: "openai:gpt-5.2".to_string(),
             tools: vec!["- kb_search: search".to_string()],
@@ -182,6 +196,7 @@ mod tests {
             agents_md: Some("# AGENTS\ncustom guidance".to_string()),
             rules: Some("- MUST keep wikilinks".to_string()),
             hints: Some("- SHOULD be concise".to_string()),
+            folder_instructions: vec![],
         };
 
         let prompt = builder.build(&ctx, &sources);
@@ -207,7 +222,7 @@ mod tests {
 
         assert!(prompt.contains("Vault path: /tmp/vault"));
         assert!(prompt.contains("Total notes: 7"));
-        assert!(prompt.contains("User language preference: Russian"));
+        assert!(prompt.contains("User language preference: English"));
         assert!(prompt.contains("Provider/model: openai/openai:gpt-5.2"));
     }
 

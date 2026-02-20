@@ -37,6 +37,7 @@ const MOCK_CONVERSATIONS: Conversation[] = [
     archived: false,
     pinned: true,
     sortOrder: 0,
+    folderId: null,
   },
   {
     id: "conv-roadmap",
@@ -47,6 +48,7 @@ const MOCK_CONVERSATIONS: Conversation[] = [
     archived: false,
     pinned: false,
     sortOrder: 1,
+    folderId: null,
   },
   {
     id: "conv-research",
@@ -57,6 +59,7 @@ const MOCK_CONVERSATIONS: Conversation[] = [
     archived: false,
     pinned: false,
     sortOrder: 2,
+    folderId: null,
   },
 ];
 
@@ -379,6 +382,7 @@ function WorkspaceFrame({ scene }: { scene: Exclude<PresskitScene, "onboarding">
     <div className="relative flex h-full bg-bg [filter:brightness(1.08)_contrast(1.08)]">
       <Sidebar
         conversations={MOCK_CONVERSATIONS}
+        folders={[]}
         activeConversationId={scene === "workflow" ? "conv-roadmap" : "conv-weekly"}
         vaultEntries={MOCK_VAULT_ENTRIES}
         loadingVaultFiles={false}
@@ -392,6 +396,14 @@ function WorkspaceFrame({ scene }: { scene: Exclude<PresskitScene, "onboarding">
         onUnarchiveConversation={noopAsync}
         onPinConversation={noopAsync}
         onUnpinConversation={noopAsync}
+        onCreateChatFolder={async () => ""}
+        onRenameChatFolder={noopAsync}
+        onArchiveChatFolder={noopAsync}
+        onPinChatFolder={noopAsync}
+        onUnpinChatFolder={noopAsync}
+        onMoveChatFolder={noopAsync}
+        onSetConversationFolder={noopAsync}
+        onOpenFolderSettings={noop}
         onCreateKbNote={noopAsync}
         onCreateKbFolder={noopAsync}
         onArchiveKbEntry={noopAsync}

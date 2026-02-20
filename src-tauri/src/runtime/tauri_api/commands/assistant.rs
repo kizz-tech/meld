@@ -202,7 +202,11 @@ fn merge_instruction_texts(global: Option<String>, local: Option<String>) -> Opt
     }
 }
 
-fn load_instruction_sources(vault: &Path) -> crate::core::agent::instructions::InstructionSources {
+fn load_instruction_sources(
+    vault: &Path,
+    db_path: &Path,
+    folder_id: Option<i64>,
+) -> crate::core::agent::instructions::InstructionSources {
     match crate::adapters::vault::ensure_vault_initialized(vault) {
         Ok(()) => {}
         Err(error) => {
@@ -220,10 +224,19 @@ fn load_instruction_sources(vault: &Path) -> crate::core::agent::instructions::I
     let local_hints = crate::adapters::vault::read_meld_hints(vault);
     let hints = merge_instruction_texts(global_hints, local_hints);
 
+    let folder_instructions = folder_id
+        .and_then(|fid| {
+            crate::adapters::vectordb::VectorDb::open(db_path)
+                .ok()
+                .and_then(|db| db.get_folder_instruction_chain(fid).ok())
+        })
+        .unwrap_or_default();
+
     crate::core::agent::instructions::InstructionSources {
         agents_md,
         rules,
         hints,
+        folder_instructions,
     }
 }
 
@@ -269,9 +282,14 @@ async fn execute_assistant_run(
         _ => !tavily_api_key.is_empty(),
     };
 
+    let folder_id = crate::adapters::vectordb::VectorDb::open(&db_path)
+        .ok()
+        .and_then(|db| db.get_conversation_folder_id(conversation_id).ok())
+        .flatten();
+
     let tool_registry = crate::adapters::mcp::ToolRegistry::new(has_web_search);
     let tool_prompt_lines = ToolPort::prompt_tool_lines(&tool_registry);
-    let instruction_sources = load_instruction_sources(vault);
+    let instruction_sources = load_instruction_sources(vault, &db_path, folder_id);
     let composed_prompt = crate::core::agent::instructions::compose_system_prompt_with_metadata(
         &vault_path,
         note_count,

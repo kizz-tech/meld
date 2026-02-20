@@ -5,6 +5,7 @@ import { useShallow } from "zustand/react/shallow";
 import {
   useAppStore,
   type Conversation,
+  type Folder,
   type Message,
 } from "@/lib/store";
 import {
@@ -30,10 +31,20 @@ import {
   reindex,
   renameConversation,
   sendMessage,
+  setEmbeddingModel,
   unarchiveConversation,
   unpinConversation,
+  createChatFolder,
+  listChatFolders,
+  renameChatFolder,
+  archiveChatFolder,
+  pinChatFolder,
+  unpinChatFolder,
+  moveChatFolder,
+  setConversationFolder,
   type VaultEntry,
   type VaultFileEntry,
+  type FolderPayload,
 } from "@/lib/tauri";
 import { setupEventListeners } from "@/lib/events";
 import {
@@ -45,12 +56,18 @@ import {
   normalizeRelativeNotePath,
   sameConversation,
 } from "@/features/layout/lib/home-helpers";
+import {
+  DEFAULT_EMBEDDING_MODELS,
+  resolveEmbeddingProviderForIndexing,
+} from "@/lib/providerCredentials";
+import { buildIndexingDisabledToast, buildReindexErrorToast } from "@/lib/chatErrors";
 
 export function useHomeController() {
   const {
     isOnboarded,
     showSettings,
     showHistory,
+    showVaultSwitcher,
     vaultPath,
     fileCount,
     chatProvider,
@@ -63,21 +80,29 @@ export function useHomeController() {
     activeNote,
     noteHistory,
     noteHistoryIndex,
+    folders,
+    activeFolderId,
+    showFolderSettings,
     setViewMode,
     openNote,
     goToPreviousNote,
     goToNextNote,
     toggleSettings,
     toggleHistory,
+    openVaultSwitcher,
+    closeVaultSwitcher,
     setMessages,
     setActiveConversation,
     clearChat,
     newChat,
+    openFolderSettings,
+    closeFolderSettings,
   } = useAppStore(
     useShallow((state) => ({
       isOnboarded: state.isOnboarded,
       showSettings: state.showSettings,
       showHistory: state.showHistory,
+      showVaultSwitcher: state.showVaultSwitcher,
       vaultPath: state.vaultPath,
       fileCount: state.fileCount,
       chatProvider: state.chatProvider,
@@ -90,16 +115,23 @@ export function useHomeController() {
       activeNote: state.activeNote,
       noteHistory: state.noteHistory,
       noteHistoryIndex: state.noteHistoryIndex,
+      folders: state.folders,
+      activeFolderId: state.activeFolderId,
+      showFolderSettings: state.showFolderSettings,
       setViewMode: state.setViewMode,
       openNote: state.openNote,
       goToPreviousNote: state.goToPreviousNote,
       goToNextNote: state.goToNextNote,
       toggleSettings: state.toggleSettings,
       toggleHistory: state.toggleHistory,
+      openVaultSwitcher: state.openVaultSwitcher,
+      closeVaultSwitcher: state.closeVaultSwitcher,
       setMessages: state.setMessages,
       setActiveConversation: state.setActiveConversation,
       clearChat: state.clearChat,
       newChat: state.newChat,
+      openFolderSettings: state.openFolderSettings,
+      closeFolderSettings: state.closeFolderSettings,
     })),
   );
 
@@ -110,10 +142,12 @@ export function useHomeController() {
   const [loadingVaultFiles, setLoadingVaultFiles] = useState(false);
   const [noteContent, setNoteContent] = useState<string | null>(null);
   const [loadingNotePreview, setLoadingNotePreview] = useState(false);
+  const [pendingFolderForNewChatId, setPendingFolderForNewChatId] = useState<string | null>(null);
   const vaultFilesRequestInFlight = useRef(false);
   const vaultSnapshotInitializedRef = useRef(false);
   const vaultFilesSignatureRef = useRef("");
   const vaultEntriesSignatureRef = useRef("");
+  const lastVaultPathRef = useRef<string | null>(null);
   const vaultFilesRef = useRef(vaultFiles);
   vaultFilesRef.current = vaultFiles;
   const vaultPathRef = useRef(vaultPath);
@@ -145,6 +179,29 @@ export function useHomeController() {
       useAppStore.getState().setConversations([]);
     } finally {
       setLoadingConversations(false);
+    }
+  }, []);
+
+  const normalizeFolder = (payload: FolderPayload): Folder => ({
+    id: String(payload.id),
+    name: payload.name,
+    icon: payload.icon ?? null,
+    customInstruction: payload.custom_instruction ?? null,
+    defaultModelId: payload.default_model_id ?? null,
+    parentId: payload.parent_id ? String(payload.parent_id) : null,
+    pinned: payload.pinned ?? false,
+    archived: payload.archived ?? false,
+    sortOrder: payload.sort_order ?? null,
+    createdAt: payload.created_at ?? new Date().toISOString(),
+    updatedAt: payload.updated_at ?? new Date().toISOString(),
+  });
+
+  const loadFolders = useCallback(async () => {
+    try {
+      const result = await listChatFolders();
+      useAppStore.getState().setFolders(result.map(normalizeFolder));
+    } catch (error) {
+      console.error("Failed to load folders:", error);
     }
   }, []);
 
@@ -224,7 +281,42 @@ export function useHomeController() {
   useEffect(() => {
     if (!isOnboarded) return;
     void loadConversations();
-  }, [isOnboarded, loadConversations]);
+    void loadFolders();
+  }, [isOnboarded, loadConversations, loadFolders]);
+
+  useEffect(() => {
+    const normalizedVaultPath = vaultPath
+      ? vaultPath.replace(/\\/g, "/").replace(/\/+$/, "")
+      : null;
+
+    if (!isOnboarded || !normalizedVaultPath) {
+      lastVaultPathRef.current = normalizedVaultPath;
+      return;
+    }
+
+    if (lastVaultPathRef.current === normalizedVaultPath) {
+      return;
+    }
+
+    const isInitialVault = lastVaultPathRef.current === null;
+    lastVaultPathRef.current = normalizedVaultPath;
+    if (isInitialVault) {
+      return;
+    }
+
+    useAppStore.setState({
+      activeNote: null,
+      noteHistory: [],
+      noteHistoryIndex: -1,
+    });
+    setNoteContent(null);
+    setVaultFiles([]);
+    setVaultEntries([]);
+    vaultSnapshotInitializedRef.current = false;
+    vaultFilesSignatureRef.current = "";
+    vaultEntriesSignatureRef.current = "";
+    void loadVaultFiles();
+  }, [isOnboarded, loadVaultFiles, vaultPath]);
 
   useEffect(() => {
     if (viewMode !== "files") return;
@@ -310,6 +402,7 @@ export function useHomeController() {
 
       if (event.key.toLowerCase() === "n") {
         event.preventDefault();
+        setPendingFolderForNewChatId(null);
         newChat();
       } else if (event.key === ",") {
         event.preventDefault();
@@ -323,10 +416,11 @@ export function useHomeController() {
 
   const handleSelectConversation = useCallback(
     async (conversationId: Conversation["id"]) => {
-      // Close Settings/History when selecting a chat
+      // Close Settings/History/FolderSettings when selecting a chat
       const s = useAppStore.getState();
       if (s.showSettings) s.toggleSettings();
       if (s.showHistory) s.toggleHistory();
+      if (s.showFolderSettings) s.closeFolderSettings();
 
       // Suppress streaming events from the previous conversation so chat:done
       // handler just resets state instead of building a message from stale data.
@@ -343,6 +437,7 @@ export function useHomeController() {
         timelineSteps: [],
       });
 
+      setPendingFolderForNewChatId(null);
       setActiveConversation(conversationId);
       try {
         const result = await getConversationMessages(conversationId);
@@ -356,8 +451,13 @@ export function useHomeController() {
     [setActiveConversation, setMessages],
   );
 
-  const handleNewChat = useCallback(() => {
+  const handleNewChat = useCallback((folderId: string | null = null) => {
+    const s = useAppStore.getState();
+    if (s.showSettings) s.toggleSettings();
+    if (s.showHistory) s.toggleHistory();
+    if (s.showFolderSettings) s.closeFolderSettings();
     setViewMode("chats");
+    setPendingFolderForNewChatId(folderId);
     newChat();
   }, [newChat, setViewMode]);
 
@@ -395,10 +495,11 @@ export function useHomeController() {
 
   const handleSelectNote = useCallback(
     (path: string) => {
-      // Close Settings/History when selecting a note
+      // Close Settings/History/FolderSettings when selecting a note
       const s = useAppStore.getState();
       if (s.showSettings) s.toggleSettings();
       if (s.showHistory) s.toggleHistory();
+      if (s.showFolderSettings) s.closeFolderSettings();
 
       clearTimeout(selectNoteTimerRef.current);
       selectNoteTimerRef.current = setTimeout(() => {
@@ -423,7 +524,15 @@ export function useHomeController() {
     async (message: string) => {
       const store = useAppStore.getState();
       store.setStreamSuppressed(false);
-      const response = await sendMessage(message, store.activeConversationId);
+      const pendingFolderId =
+        store.activeConversationId === null
+          ? pendingFolderForNewChatId
+          : null;
+      const response = await sendMessage(
+        message,
+        store.activeConversationId,
+        pendingFolderId,
+      );
       const conversationId = String(response.conversation_id);
       if (!sameConversation(store.activeConversationId, conversationId)) {
         store.setActiveConversation(conversationId);
@@ -432,8 +541,9 @@ export function useHomeController() {
       const persistedMessages = await getConversationMessages(conversationId);
       setMessages(persistedMessages.map((item) => normalizeMessage(item)));
       await loadConversations();
+      setPendingFolderForNewChatId(null);
     },
-    [loadConversations, setMessages],
+    [loadConversations, pendingFolderForNewChatId, setMessages],
   );
 
   const handleRegenerateLastResponse = useCallback(
@@ -553,11 +663,37 @@ export function useHomeController() {
     const store = useAppStore.getState();
     if (store.isIndexing) return;
 
+    try {
+      const config = await getConfig();
+      const resolvedEmbeddingProvider = resolveEmbeddingProviderForIndexing(config);
+      const currentEmbeddingProvider =
+        config.embedding_provider?.trim().toLowerCase() || "openai";
+
+      if (!resolvedEmbeddingProvider) {
+        const toast = buildIndexingDisabledToast();
+        store.showToast(toast.message, toast.options);
+        return;
+      }
+
+      if (resolvedEmbeddingProvider !== currentEmbeddingProvider) {
+        await setEmbeddingModel(
+          resolvedEmbeddingProvider,
+          DEFAULT_EMBEDDING_MODELS[resolvedEmbeddingProvider],
+        );
+        store.setEmbeddingProvider(resolvedEmbeddingProvider);
+      }
+    } catch (error) {
+      console.error("Failed to prepare reindex:", error);
+    }
+
     store.setIndexing(true);
     try {
       await reindex();
     } catch (error) {
       console.error("Failed to reindex:", error);
+      const toast = buildReindexErrorToast(error);
+      store.showToast(toast.message, toast.options);
+    } finally {
       store.setIndexing(false);
     }
   }, []);
@@ -843,6 +979,87 @@ export function useHomeController() {
     [],
   );
 
+  const handleCreateChatFolder = useCallback(
+    async (parentId: string | null): Promise<string> => {
+      const id = await createChatFolder("New folder", parentId);
+      await loadFolders();
+      return String(id);
+    },
+    [loadFolders],
+  );
+
+  const handleRenameChatFolder = useCallback(
+    async (folderId: string, name: string) => {
+      await renameChatFolder(folderId, name);
+      await loadFolders();
+    },
+    [loadFolders],
+  );
+
+  const handleArchiveChatFolder = useCallback(
+    async (folderId: string) => {
+      await archiveChatFolder(folderId);
+      await loadFolders();
+      await loadConversations();
+    },
+    [loadConversations, loadFolders],
+  );
+
+  const handlePinChatFolder = useCallback(
+    async (folderId: string) => {
+      await pinChatFolder(folderId);
+      await loadFolders();
+    },
+    [loadFolders],
+  );
+
+  const handleUnpinChatFolder = useCallback(
+    async (folderId: string) => {
+      await unpinChatFolder(folderId);
+      await loadFolders();
+    },
+    [loadFolders],
+  );
+
+  const handleMoveChatFolder = useCallback(
+    async (folderId: string, newParentId: string | null) => {
+      await moveChatFolder(folderId, newParentId);
+      await loadFolders();
+    },
+    [loadFolders],
+  );
+
+  const handleSetConversationFolder = useCallback(
+    async (conversationId: string, folderId: string | null) => {
+      await setConversationFolder(conversationId, folderId);
+      await loadConversations();
+    },
+    [loadConversations],
+  );
+
+  const handleOpenFolderSettings = useCallback(
+    (folderId: string) => {
+      openFolderSettings(folderId);
+    },
+    [openFolderSettings],
+  );
+
+  const handleCloseFolderSettings = useCallback(() => {
+    closeFolderSettings();
+  }, [closeFolderSettings]);
+
+  const handleFolderArchived = useCallback(
+    async (_folderId: string) => {
+      await loadFolders();
+      await loadConversations();
+    },
+    [loadConversations, loadFolders],
+  );
+
+  const handleFolderUpdated = useCallback(async () => {
+    await loadFolders();
+  }, [loadFolders]);
+
   const vaultName = useMemo(() => {
     if (!vaultPath) return "Vault";
     const normalizedPath = vaultPath.replaceAll("\\", "/");
@@ -850,12 +1067,98 @@ export function useHomeController() {
     return parts[parts.length - 1] ?? "Vault";
   }, [vaultPath]);
 
+  const folderById = useMemo(() => {
+    const map = new Map<string, Folder>();
+    folders.forEach((folder) => {
+      map.set(folder.id, folder);
+    });
+    return map;
+  }, [folders]);
+
+  const activeConversation = useMemo(
+    () =>
+      conversations.find((conversation) =>
+        sameConversation(conversation.id, activeConversationId),
+      ) ?? null,
+    [activeConversationId, conversations],
+  );
+
+  const activeChatFolderPath = useMemo(() => {
+    const startFolderId = activeConversation?.folderId ?? pendingFolderForNewChatId;
+    if (!startFolderId) {
+      return [] as string[];
+    }
+
+    const chain: string[] = [];
+    const visited = new Set<string>();
+    let currentFolderId: string | null = startFolderId;
+
+    while (currentFolderId) {
+      if (visited.has(currentFolderId)) break;
+      visited.add(currentFolderId);
+
+      const folder = folderById.get(currentFolderId);
+      if (!folder) break;
+      chain.push(folder.name);
+      currentFolderId = folder.parentId;
+    }
+
+    chain.reverse();
+    return chain;
+  }, [activeConversation?.folderId, folderById, pendingFolderForNewChatId]);
+
+  const isChatScopedToFolder = activeChatFolderPath.length > 0;
+  const chatScopeLabel = isChatScopedToFolder
+    ? activeChatFolderPath.join(" / ")
+    : "Root";
+
+  const activeModelId = useMemo(() => {
+    const fallbackModelId = chatModel
+      ? `${chatProvider}:${chatModel}`
+      : chatProvider || "—";
+
+    const resolveFolderModelId = (
+      startFolderId: string | null | undefined,
+    ): string | null => {
+      let currentFolderId = startFolderId ?? null;
+      const visited = new Set<string>();
+
+      while (currentFolderId) {
+        if (visited.has(currentFolderId)) break;
+        visited.add(currentFolderId);
+
+        const folder = folderById.get(currentFolderId);
+        if (!folder) break;
+
+        const normalizedModelId = folder.defaultModelId?.trim();
+        if (normalizedModelId) {
+          return normalizedModelId;
+        }
+        currentFolderId = folder.parentId;
+      }
+
+      return null;
+    };
+
+    const folderModelId = resolveFolderModelId(
+      activeConversation?.folderId ?? pendingFolderForNewChatId,
+    );
+    return folderModelId ?? fallbackModelId;
+  }, [
+    activeConversation?.folderId,
+    chatModel,
+    chatProvider,
+    folderById,
+    pendingFolderForNewChatId,
+  ]);
+
   return {
     state: {
       loading,
       isOnboarded,
       showSettings,
       showHistory,
+      showVaultSwitcher,
       vaultPath,
       fileCount,
       chatProvider,
@@ -874,6 +1177,12 @@ export function useHomeController() {
       noteContent,
       loadingNotePreview,
       vaultName,
+      activeModelId,
+      chatScopeLabel,
+      isChatScopedToFolder,
+      folders,
+      activeFolderId,
+      showFolderSettings,
     },
     actions: {
       setViewMode,
@@ -881,6 +1190,8 @@ export function useHomeController() {
       goToNextNote,
       toggleSettings,
       toggleHistory,
+      openVaultSwitcher,
+      closeVaultSwitcher,
       handleSendMessage,
       handleRegenerateLastResponse,
       handleSelectConversation,
@@ -892,6 +1203,17 @@ export function useHomeController() {
       handleUnarchiveConversation,
       handlePinConversation,
       handleUnpinConversation,
+      handleCreateChatFolder,
+      handleRenameChatFolder,
+      handleArchiveChatFolder,
+      handlePinChatFolder,
+      handleUnpinChatFolder,
+      handleMoveChatFolder,
+      handleSetConversationFolder,
+      handleOpenFolderSettings,
+      handleCloseFolderSettings,
+      handleFolderArchived,
+      handleFolderUpdated,
       handleCreateKbNote,
       handleCreateKbFolder,
       handleArchiveKbEntry,

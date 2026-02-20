@@ -280,8 +280,13 @@ pub fn read_note_verification(
     })
 }
 
-fn ensure_within_vault(vault_path: &Path, full_path: &Path) -> Result<(), std::io::Error> {
-    let canonical_vault = vault_path.canonicalize().unwrap_or_else(|_| vault_path.to_path_buf());
+pub(crate) fn ensure_within_vault(
+    vault_path: &Path,
+    full_path: &Path,
+) -> Result<(), std::io::Error> {
+    let canonical_vault = vault_path
+        .canonicalize()
+        .unwrap_or_else(|_| vault_path.to_path_buf());
     // For paths that don't exist yet, canonicalize the parent
     let canonical_target = if full_path.exists() {
         full_path.canonicalize()?
@@ -296,10 +301,7 @@ fn ensure_within_vault(vault_path: &Path, full_path: &Path) -> Result<(), std::i
     if !canonical_target.starts_with(&canonical_vault) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
-            format!(
-                "Path escapes vault boundary: {}",
-                full_path.display()
-            ),
+            format!("Path escapes vault boundary: {}", full_path.display()),
         ));
     }
     Ok(())

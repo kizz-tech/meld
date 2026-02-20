@@ -24,6 +24,7 @@ import {
   Circle,
   ChevronDown,
   Pencil,
+  X,
   Check,
   Copy,
   RefreshCw,
@@ -659,8 +660,17 @@ function MessageBubble({
   const [collapsed, setCollapsed] = useState(true);
   const techMenuRef = useRef<HTMLDivElement | null>(null);
   const editTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const userBubbleRef = useRef<HTMLDivElement>(null);
+  const [editBubbleWidth, setEditBubbleWidth] = useState<number | null>(null);
 
   const isLongUserMessage = isUser && message.content.length > 300;
+
+  const captureEditBubbleWidth = useCallback(() => {
+    const measured = userBubbleRef.current?.getBoundingClientRect().width;
+    if (!measured || !Number.isFinite(measured)) return;
+    const rounded = Math.round(measured);
+    setEditBubbleWidth((prev) => (prev === rounded ? prev : rounded));
+  }, []);
 
   const resizeEditTextarea = useCallback(() => {
     const el = editTextareaRef.current;
@@ -672,6 +682,24 @@ function MessageBubble({
   useLayoutEffect(() => {
     if (isEditing) resizeEditTextarea();
   }, [isEditing, draftText, resizeEditTextarea]);
+
+  useLayoutEffect(() => {
+    if (!isUser || isEditing) return;
+    captureEditBubbleWidth();
+  }, [captureEditBubbleWidth, collapsed, isEditing, isUser, message.content]);
+
+  useEffect(() => {
+    if (!isUser || isEditing) return;
+    if (typeof ResizeObserver === "undefined") return;
+    const target = userBubbleRef.current;
+    if (!target) return;
+
+    const observer = new ResizeObserver(() => {
+      captureEditBubbleWidth();
+    });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [captureEditBubbleWidth, isEditing, isUser]);
 
   const markdownContent = useMemo(
     () => transformWikilinks(message.content),
@@ -728,6 +756,12 @@ function MessageBubble({
     }
   };
 
+  const cancelEdit = useCallback(() => {
+    setIsEditing(false);
+    setDraftText(message.content);
+    setLocalError(null);
+  }, [message.content]);
+
   const confirmDelete = async () => {
     if (!onDeleteMessage) return;
     setDeleting(true);
@@ -770,19 +804,57 @@ function MessageBubble({
     };
   }, [showTechMenu]);
 
+  useEffect(() => {
+    if (isEditing) {
+      setShowTechMenu(false);
+    }
+  }, [isEditing]);
+
   const actionBar = !isStreamingMessage ? (
     <div className="flex items-center gap-1">
       {canEdit && (
-        <IconButton
-          title="Edit message"
-          onClick={() => {
-            setDraftText(message.content);
-            setLocalError(null);
-            setIsEditing(true);
-          }}
-        >
-          <Pencil className="h-3.5 w-3.5" />
-        </IconButton>
+        isEditing ? (
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={cancelEdit}
+              disabled={savingEdit}
+              title="Cancel edit"
+              aria-label="Cancel edit"
+              className="flex h-7 w-7 items-center justify-center rounded-lg text-text-muted/80 transition-colors duration-[120ms] hover:text-text disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                void submitEdit();
+              }}
+              disabled={savingEdit || !draftText.trim()}
+              title="Save edit"
+              aria-label="Save edit"
+              className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent/15 text-accent transition-colors duration-[120ms] hover:bg-accent/22 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {savingEdit ? (
+                <RefreshCw className="h-3.5 w-3.5 animate-spin" strokeWidth={1.7} />
+              ) : (
+                <Check className="h-3.5 w-3.5" />
+              )}
+            </button>
+          </div>
+        ) : (
+          <IconButton
+            title="Edit message"
+            onClick={() => {
+              setDraftText(message.content);
+              setLocalError(null);
+              captureEditBubbleWidth();
+              setIsEditing(true);
+            }}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </IconButton>
+        )
       )}
 
       {message.role === "assistant" && (
@@ -813,7 +885,7 @@ function MessageBubble({
         </IconButton>
       )}
 
-      {(canDelete || canOpenRunTrace) && (
+      {(canDelete || canOpenRunTrace) && !isEditing && (
         <div ref={techMenuRef} className="relative">
           <IconButton
             title="Technical actions"
@@ -874,7 +946,12 @@ function MessageBubble({
         {/* Message content */}
         <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
           {isEditing ? (
-            <div className={isUser ? "ml-auto w-full max-w-[85%]" : "w-full max-w-[85%]"}>
+            <div
+              className="w-fit max-w-[85%] rounded-[20px] border border-overlay-6 bg-overlay-5 px-5 py-3.5"
+              style={{
+                width: editBubbleWidth ? `${editBubbleWidth}px` : undefined,
+              }}
+            >
               <textarea
                 ref={editTextareaRef}
                 value={draftText}
@@ -882,34 +959,14 @@ function MessageBubble({
                 rows={1}
                 style={{ maxHeight: 400 }}
                 disabled={savingEdit}
-                className="w-full resize-none overflow-y-auto rounded-[20px] border border-overlay-8 bg-overlay-5 px-5 py-3.5 text-sm leading-relaxed text-text outline-none transition-colors focus-visible:border-border-focus focus-visible:shadow-[0_0_0_1px_var(--color-border-focus)]"
+                className="w-full resize-none overflow-y-auto bg-transparent text-sm leading-relaxed text-text outline-none"
               />
-              <div className="mt-2 flex items-center justify-end gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsEditing(false);
-                    setDraftText(message.content);
-                    setLocalError(null);
-                  }}
-                  className="rounded-lg px-2.5 py-1 text-xs text-text-muted transition-colors duration-[120ms] hover:text-text"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void submitEdit();
-                  }}
-                  disabled={savingEdit || !draftText.trim()}
-                  className="rounded-lg bg-accent/15 px-2.5 py-1 text-xs text-accent transition-colors duration-[120ms] hover:bg-accent/22 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {savingEdit ? "Saving..." : "Save"}
-                </button>
-              </div>
             </div>
           ) : isUser ? (
-            <div className="max-w-[85%] rounded-[20px] border border-overlay-6 bg-overlay-5 px-5 py-3.5">
+            <div
+              ref={userBubbleRef}
+              className="w-fit max-w-[85%] rounded-[20px] border border-overlay-6 bg-overlay-5 px-5 py-3.5"
+            >
               <div
                 className={`whitespace-pre-wrap text-sm leading-relaxed text-text ${
                   isLongUserMessage && collapsed ? "line-clamp-6" : ""
@@ -933,7 +990,7 @@ function MessageBubble({
             </div>
           ) : (
             <div
-              className="max-w-[85%]"
+              className="w-full max-w-[85%]"
               style={{
                 minHeight: isStreamingMessage ? "48px" : undefined,
                 overflowAnchor: isStreamingMessage ? "none" : undefined,
@@ -1042,7 +1099,11 @@ function MessageBubble({
         {/* Actions + timestamp — below message */}
         {!isStreamingMessage && (
           <div className={`mt-1 flex ${isUser ? "justify-end" : "justify-start"}`}>
-            <div className="flex items-center gap-2 opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100">
+            <div
+              className={`flex items-center gap-2 transition-opacity duration-[120ms] ${
+                isEditing ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+              }`}
+            >
               <span
                 className="text-[10px] font-mono text-text-muted/50"
                 title={

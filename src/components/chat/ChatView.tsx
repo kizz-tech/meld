@@ -19,10 +19,14 @@ const QUICK_PROMPTS = [
 
 interface ChatViewProps {
   onSendMessage?: (message: string) => Promise<void> | void;
-  onRegenerateLastResponse?: (assistantMessageId?: string) => Promise<void> | void;
+  onRegenerateLastResponse?: (
+    assistantMessageId?: string,
+  ) => Promise<void> | void;
   onEditMessage?: (messageId: string, content: string) => Promise<void> | void;
   onDeleteMessage?: (messageId: string) => Promise<void> | void;
   onOpenNote?: (path: string) => void;
+  chatScopeLabel?: string;
+  isChatScopedToFolder?: boolean;
 }
 
 function ChatView({
@@ -31,20 +35,31 @@ function ChatView({
   onEditMessage,
   onDeleteMessage,
   onOpenNote,
+  chatScopeLabel = "Root",
+  isChatScopedToFolder = false,
 }: ChatViewProps) {
-  const { messages, streamingContent, isStreaming, agentActivity, timelineSteps, thinkingLog } =
-    useAppStore(useShallow(selectChatViewState));
+  const {
+    messages,
+    streamingContent,
+    isStreaming,
+    agentActivity,
+    timelineSteps,
+    thinkingLog,
+  } = useAppStore(useShallow(selectChatViewState));
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const autoStickRef = useRef(true);
   const initialized = useRef(false);
   const [runTraceOpen, setRunTraceOpen] = useState(false);
   const [runTraceId, setRunTraceId] = useState<string | null>(null);
-  const [runTraceEvents, setRunTraceEvents] = useState<RunEventPayload[] | null>(null);
+  const [runTraceEvents, setRunTraceEvents] = useState<
+    RunEventPayload[] | null
+  >(null);
   const [runTraceLoading, setRunTraceLoading] = useState(false);
-  const [quickPrompt, setQuickPrompt] = useState<{ id: number; text: string } | null>(
-    null,
-  );
+  const [quickPrompt, setQuickPrompt] = useState<{
+    id: number;
+    text: string;
+  } | null>(null);
 
   const lastAssistantMessageId = useMemo(() => {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -68,6 +83,10 @@ function ChatView({
     }
     return ids;
   }, [messages]);
+
+  const emptyStateScopeCopy = isChatScopedToFolder
+    ? `You're in ${chatScopeLabel}.`
+    : "You're in Home.";
 
   useEffect(() => {
     if (!initialized.current) {
@@ -131,6 +150,9 @@ function ChatView({
               <p className="mt-2 text-[15px] text-text-secondary/80">
                 Your knowledge, your context, your AI.
               </p>
+              <p className="mx-auto mt-5 inline-flex max-w-[520px] items-center rounded-full border border-overlay-10 bg-overlay-2 px-4 py-2 text-center text-[12px] text-text-secondary">
+                {emptyStateScopeCopy}
+              </p>
 
               <div className="mt-10 grid gap-3.5">
                 {QUICK_PROMPTS.map((prompt) => (
@@ -158,7 +180,8 @@ function ChatView({
             key={message.id}
             message={message}
             isLastAssistant={
-              message.role === "assistant" && message.id === lastAssistantMessageId
+              message.role === "assistant" &&
+              message.id === lastAssistantMessageId
             }
             deletesFollowingAssistantReply={userMessagesWithFollowingAssistant.has(
               message.id,
@@ -178,7 +201,8 @@ function ChatView({
               role: "assistant",
               content: streamingContent,
               timestamp: Date.now(),
-              timelineSteps: timelineSteps.length > 0 ? timelineSteps : undefined,
+              timelineSteps:
+                timelineSteps.length > 0 ? timelineSteps : undefined,
               thinkingEntries: thinkingLog.length > 0 ? thinkingLog : undefined,
             }}
             liveActivity={agentActivity}

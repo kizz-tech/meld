@@ -198,8 +198,7 @@ pub fn auto_commit_files(
                 return Ok(()); // Nothing to commit
             }
 
-            let oid =
-                repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent_commit])?;
+            let oid = repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent_commit])?;
             log::debug!(
                 "git auto-commit: oid={}, files={}, message={}",
                 oid,

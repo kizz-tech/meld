@@ -19,9 +19,10 @@ pub async fn set_api_key(provider: String, key: String) -> Result<(), String> {
     let provider = normalize_provider(&provider);
     ensure_valid_provider_id(&provider)?;
 
-    let mut settings = Settings::load_global();
-    settings.set_api_key(&provider, key.trim());
-    settings.save().map_err(|e| e.to_string())
+    Settings::update_global(|settings| {
+        settings.set_api_key(&provider, key.trim());
+        Ok(())
+    })
 }
 
 #[tauri::command]
@@ -29,9 +30,7 @@ pub async fn set_oauth_client(provider: String, client_id: String) -> Result<(),
     let provider = normalize_provider(&provider);
     ensure_valid_provider_id(&provider)?;
 
-    let mut settings = Settings::load_global();
-    settings.set_oauth_client(&provider, &client_id)?;
-    settings.save().map_err(|e| e.to_string())
+    Settings::update_global(|settings| settings.set_oauth_client(&provider, &client_id))
 }
 
 #[tauri::command]
@@ -39,11 +38,7 @@ pub async fn set_auth_mode(provider: String, mode: String) -> Result<(), String>
     let provider = normalize_provider(&provider);
     ensure_valid_provider_id(&provider)?;
 
-    let mut settings = Settings::load_global();
-    settings
-        .set_auth_mode(&provider, &mode)
-        .map_err(|e| e.to_string())?;
-    settings.save().map_err(|e| e.to_string())
+    Settings::update_global(|settings| settings.set_auth_mode(&provider, &mode))
 }
 
 #[tauri::command]
@@ -82,9 +77,10 @@ pub async fn set_model(provider: String, model: String) -> Result<(), String> {
         return Err("model is required".to_string());
     }
 
-    let mut settings = Settings::load_global();
-    settings.set_model(&provider, &model);
-    settings.save().map_err(|e| e.to_string())
+    Settings::update_global(|settings| {
+        settings.set_model(&provider, &model);
+        Ok(())
+    })
 }
 
 #[tauri::command]
@@ -107,48 +103,47 @@ pub async fn set_embedding_model(provider: String, model: String) -> Result<(), 
         ));
     }
 
-    let mut settings = Settings::load_global();
-    settings
-        .set_embedding_model(&provider, &model)
-        .map_err(|e| e.to_string())?;
+    Settings::update_global(|settings| {
+        settings.set_embedding_model(&provider, &model)?;
 
-    let auth_mode = settings.auth_mode_for_provider(&provider);
-    let has_api_key = settings
-        .api_key_for_provider(&provider)
-        .map(|value| !value.trim().is_empty())
-        .unwrap_or(false);
-    let has_oauth = settings.oauth_token_for_provider(&provider).is_some();
-    if auth_mode == "oauth" {
-        if !has_oauth {
+        let auth_mode = settings.auth_mode_for_provider(&provider);
+        let has_api_key = settings
+            .api_key_for_provider(&provider)
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false);
+        let has_oauth = settings.oauth_token_for_provider(&provider).is_some();
+        if auth_mode == "oauth" {
+            if !has_oauth {
+                return Err(format!(
+                    "No OAuth token configured for embedding provider '{}'",
+                    provider
+                ));
+            }
+        } else if !has_api_key {
             return Err(format!(
-                "No OAuth token configured for embedding provider '{}'",
+                "No API key configured for embedding provider '{}'",
                 provider
             ));
         }
-    } else if !has_api_key {
-        return Err(format!(
-            "No API key configured for embedding provider '{}'",
-            provider
-        ));
-    }
 
-    settings.save().map_err(|e| e.to_string())
+        Ok(())
+    })
 }
 
 #[tauri::command]
 pub async fn set_fallback_model(model_id: Option<String>) -> Result<(), String> {
-    let mut settings = Settings::load_global();
-    settings
-        .set_fallback_chat_model(model_id.as_deref())
-        .map_err(|e| e.to_string())?;
-    settings.save().map_err(|e| e.to_string())
+    Settings::update_global(|settings| {
+        settings.set_fallback_chat_model(model_id.as_deref())?;
+        Ok(())
+    })
 }
 
 #[tauri::command]
 pub async fn set_user_language(language: String) -> Result<(), String> {
-    let mut settings = Settings::load_global();
-    settings.set_user_language(&language);
-    settings.save().map_err(|e| e.to_string())
+    Settings::update_global(|settings| {
+        settings.set_user_language(&language);
+        Ok(())
+    })
 }
 
 #[tauri::command]
@@ -160,14 +155,16 @@ pub async fn set_search_provider(provider: String) -> Result<(), String> {
             provider
         ));
     }
-    let mut settings = Settings::load_global();
-    settings.set_search_provider(&normalized);
-    settings.save().map_err(|e| e.to_string())
+    Settings::update_global(|settings| {
+        settings.set_search_provider(&normalized);
+        Ok(())
+    })
 }
 
 #[tauri::command]
 pub async fn set_searxng_base_url(url: String) -> Result<(), String> {
-    let mut settings = Settings::load_global();
-    settings.set_searxng_base_url(&url);
-    settings.save().map_err(|e| e.to_string())
+    Settings::update_global(|settings| {
+        settings.set_searxng_base_url(&url);
+        Ok(())
+    })
 }

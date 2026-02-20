@@ -146,6 +146,10 @@ body::before {
   background-size: 200px 200px;
 }
 
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
 /* Scrollbar — hidden globally; panels that need a visible scrollbar
    can opt in with .scrollbar-visible */
 ::-webkit-scrollbar {

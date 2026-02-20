@@ -34,6 +34,33 @@ fn normalize_relative_entry_path(path: &str) -> Result<String, String> {
     Ok(parts.join("/"))
 }
 
+fn resolve_vault_path(path: &str) -> Result<PathBuf, String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("Path is empty".to_string());
+    }
+
+    let requested_path = PathBuf::from(trimmed);
+    let absolute_path = if requested_path.is_absolute() {
+        requested_path
+    } else {
+        std::env::current_dir()
+            .map_err(|e| format!("Failed to resolve current directory: {e}"))?
+            .join(requested_path)
+    };
+
+    if !absolute_path.exists() {
+        std::fs::create_dir_all(&absolute_path)
+            .map_err(|e| format!("Failed to create directory: {e}"))?;
+    } else if !absolute_path.is_dir() {
+        return Err("Path exists but is not a directory".to_string());
+    }
+
+    absolute_path
+        .canonicalize()
+        .map_err(|e| format!("Failed to canonicalize vault path: {e}"))
+}
+
 fn to_relative_under(root: &Path, path: &Path) -> Result<String, String> {
     let relative = path
         .strip_prefix(root)
@@ -94,19 +121,16 @@ fn build_archive_target_path(archive_root: &Path, relative_path: &str) -> Result
 
 #[tauri::command]
 pub async fn select_vault(app: AppHandle, path: String) -> Result<VaultInfo, String> {
-    let vault_path = std::path::Path::new(&path);
-    if !vault_path.exists() {
-        std::fs::create_dir_all(vault_path)
-            .map_err(|e| format!("Failed to create directory: {}", e))?;
-    } else if !vault_path.is_dir() {
-        return Err("Path exists but is not a directory".to_string());
-    }
+    let vault_path = resolve_vault_path(&path)?;
+    let selected_path = vault_path.to_string_lossy().to_string();
 
-    let info = crate::adapters::vault::scan_vault(vault_path).map_err(|e| e.to_string())?;
+    let info = crate::adapters::vault::scan_vault(&vault_path).map_err(|e| e.to_string())?;
 
-    let mut settings = Settings::load_global();
-    settings.vault_path = Some(path);
-    settings.save().map_err(|e| e.to_string())?;
+    Settings::update_global(|settings| {
+        settings.push_recent_vault(&selected_path);
+        settings.vault_path = Some(selected_path.clone());
+        Ok(())
+    })?;
     ensure_vault_watcher(&app);
 
     Ok(info)
@@ -118,13 +142,22 @@ pub async fn get_vault_info(app: AppHandle) -> Result<Option<VaultInfo>, String>
     match &settings.vault_path {
         Some(path) => {
             let vault_path = std::path::Path::new(path);
-            if vault_path.exists() {
+            if vault_path.exists() && vault_path.is_dir() {
                 ensure_vault_watcher(&app);
                 let info =
                     crate::adapters::vault::scan_vault(vault_path).map_err(|e| e.to_string())?;
                 Ok(Some(info))
             } else {
                 stop_vault_watcher();
+                let stale_path = path.clone();
+                if let Err(error) = Settings::update_global(|settings| {
+                    if settings.vault_path.as_deref() == Some(stale_path.as_str()) {
+                        settings.vault_path = None;
+                    }
+                    Ok(())
+                }) {
+                    log::warn!("Failed to clear stale vault path from config: {}", error);
+                }
                 Ok(None)
             }
         }
@@ -170,7 +203,29 @@ pub async fn list_vault_files() -> Result<Vec<VaultFileEntry>, String> {
 
 #[tauri::command]
 pub async fn preview_file(path: String) -> Result<String, String> {
-    std::fs::read_to_string(&path).map_err(|e| e.to_string())
+    let settings = Settings::load_global();
+    let vault_path = settings.vault_path.ok_or("No vault configured")?;
+    let vault_root = Path::new(&vault_path);
+    let requested_path = Path::new(&path);
+    let full_path = if requested_path.is_absolute() {
+        requested_path.to_path_buf()
+    } else {
+        vault_root.join(requested_path)
+    };
+
+    crate::adapters::vault::ensure_within_vault(vault_root, &full_path)
+        .map_err(|e| e.to_string())?;
+    let canonical_path = full_path.canonicalize().map_err(|e| e.to_string())?;
+    let is_markdown = canonical_path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.eq_ignore_ascii_case("md"))
+        .unwrap_or(false);
+    if !is_markdown {
+        return Err("Only markdown files can be previewed".to_string());
+    }
+
+    std::fs::read_to_string(canonical_path).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -375,4 +430,29 @@ pub async fn move_vault_entry(from_path: String, to_path: String) -> Result<Stri
     std::fs::rename(&from_full, &to_full).map_err(|e| e.to_string())?;
 
     Ok(to_relative.replace('\\', "/"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_vault_path;
+
+    #[test]
+    fn resolve_vault_path_rejects_empty_value() {
+        assert!(resolve_vault_path("   ").is_err());
+    }
+
+    #[test]
+    fn resolve_vault_path_creates_and_canonicalizes_directory() {
+        let root =
+            std::env::temp_dir().join(format!("meld-vault-resolve-test-{}", uuid::Uuid::new_v4()));
+        let nested = root.join("vault");
+        let nested_text = nested.to_string_lossy().to_string();
+
+        let resolved = resolve_vault_path(&nested_text).expect("resolve vault path");
+        assert!(resolved.is_absolute());
+        assert!(resolved.exists());
+        assert!(resolved.is_dir());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
 }

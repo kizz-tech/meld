@@ -63,6 +63,21 @@ export interface Conversation {
   archived: boolean;
   pinned: boolean;
   sortOrder: number | null;
+  folderId: string | null;
+}
+
+export interface Folder {
+  id: string;
+  name: string;
+  icon: string | null;
+  customInstruction: string | null;
+  defaultModelId: string | null;
+  parentId: string | null;
+  pinned: boolean;
+  archived: boolean;
+  sortOrder: number | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type AgentActivity =
@@ -79,6 +94,13 @@ export interface HistoryEntry {
   files_changed: string[];
 }
 
+export type ToastAction = "open_settings";
+
+export interface ToastOptions {
+  action?: ToastAction;
+  durationMs?: number;
+}
+
 /* ── State ─────────────────────────────────────────────── */
 
 export interface AppState {
@@ -90,6 +112,7 @@ export interface AppState {
   // UI panels
   showSettings: boolean;
   showHistory: boolean;
+  showVaultSwitcher: boolean;
   viewMode: "chats" | "files";
   sidebarCollapsed: boolean;
 
@@ -101,6 +124,11 @@ export interface AppState {
   // Conversations
   activeConversationId: string | null;
   conversations: Conversation[];
+
+  // Folders
+  folders: Folder[];
+  activeFolderId: string | null;
+  showFolderSettings: boolean;
 
   // Chat
   messages: Message[];
@@ -130,8 +158,11 @@ export interface AppState {
   setOnboarded: (v: boolean) => void;
 
   // Actions — UI
+  openSettings: () => void;
   toggleSettings: () => void;
   toggleHistory: () => void;
+  openVaultSwitcher: () => void;
+  closeVaultSwitcher: () => void;
   setViewMode: (mode: "chats" | "files") => void;
   setSidebarCollapsed: (v: boolean) => void;
   toggleSidebarCollapsed: () => void;
@@ -145,6 +176,11 @@ export interface AppState {
   setConversations: (conversations: Conversation[]) => void;
   setActiveConversation: (id: string | null) => void;
   upsertConversation: (conversation: Conversation) => void;
+
+  // Actions — folders
+  setFolders: (folders: Folder[]) => void;
+  openFolderSettings: (folderId: string) => void;
+  closeFolderSettings: () => void;
 
   // Actions — chat
   addMessage: (msg: Message) => void;
@@ -176,7 +212,9 @@ export interface AppState {
 
   // Toast
   toastMessage: string | null;
-  showToast: (message: string) => void;
+  toastAction: ToastAction | null;
+  toastDurationMs: number | null;
+  showToast: (message: string, options?: ToastOptions) => void;
   clearToast: () => void;
 
   // Actions — config
@@ -198,6 +236,7 @@ export const useAppStore = create<AppState>((set) => ({
   fileCount: 0,
   showSettings: false,
   showHistory: false,
+  showVaultSwitcher: false,
   viewMode: "chats",
   sidebarCollapsed: false,
   activeNote: null,
@@ -205,6 +244,9 @@ export const useAppStore = create<AppState>((set) => ({
   noteHistoryIndex: -1,
   activeConversationId: null,
   conversations: [],
+  folders: [],
+  activeFolderId: null,
+  showFolderSettings: false,
   messages: [],
   isStreaming: false,
   streamingContent: "",
@@ -223,13 +265,38 @@ export const useAppStore = create<AppState>((set) => ({
 
   // Vault
   setVaultPath: (path, fileCount) => set({ vaultPath: path, fileCount }),
-  setOnboarded: (v) => set({ isOnboarded: v }),
+  setOnboarded: (v) => set({ isOnboarded: v, showVaultSwitcher: false }),
 
   // UI
+  openSettings: () =>
+    set({
+      showSettings: true,
+      showHistory: false,
+      showVaultSwitcher: false,
+      showFolderSettings: false,
+    }),
   toggleSettings: () =>
-    set((s) => ({ showSettings: !s.showSettings, showHistory: false })),
+    set((s) => ({
+      showSettings: !s.showSettings,
+      showHistory: false,
+      showVaultSwitcher: false,
+      showFolderSettings: false,
+    })),
   toggleHistory: () =>
-    set((s) => ({ showHistory: !s.showHistory, showSettings: false })),
+    set((s) => ({
+      showHistory: !s.showHistory,
+      showSettings: false,
+      showVaultSwitcher: false,
+      showFolderSettings: false,
+    })),
+  openVaultSwitcher: () =>
+    set({
+      showVaultSwitcher: true,
+      showSettings: false,
+      showHistory: false,
+      showFolderSettings: false,
+    }),
+  closeVaultSwitcher: () => set({ showVaultSwitcher: false }),
   setViewMode: (mode) => set({ viewMode: mode }),
   setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
   toggleSidebarCollapsed: () =>
@@ -257,6 +324,19 @@ export const useAppStore = create<AppState>((set) => ({
       const idx = s.noteHistoryIndex + 1;
       return { noteHistoryIndex: idx, activeNote: s.noteHistory[idx] ?? null };
     }),
+
+  // Folders
+  setFolders: (folders) => set({ folders }),
+  openFolderSettings: (folderId) =>
+    set({
+      activeFolderId: folderId,
+      showFolderSettings: true,
+      showSettings: false,
+      showHistory: false,
+      showVaultSwitcher: false,
+    }),
+  closeFolderSettings: () =>
+    set({ showFolderSettings: false, activeFolderId: null }),
 
   // Conversations
   setConversations: (conversations) => set({ conversations }),
@@ -352,8 +432,16 @@ export const useAppStore = create<AppState>((set) => ({
 
   // Toast
   toastMessage: null,
-  showToast: (message) => set({ toastMessage: message }),
-  clearToast: () => set({ toastMessage: null }),
+  toastAction: null,
+  toastDurationMs: null,
+  showToast: (message, options) =>
+    set({
+      toastMessage: message,
+      toastAction: options?.action ?? null,
+      toastDurationMs: options?.durationMs ?? null,
+    }),
+  clearToast: () =>
+    set({ toastMessage: null, toastAction: null, toastDurationMs: null }),
 
   // Config
   setChatProvider: (provider) => set({ chatProvider: provider }),

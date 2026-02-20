@@ -38,6 +38,7 @@ export const normalizeConversation = (
     archived: conversation.archived ?? false,
     pinned: conversation.pinned ?? false,
     sortOrder: conversation.sort_order ?? null,
+    folderId: conversation.folder_id ?? null,
   };
 };
 

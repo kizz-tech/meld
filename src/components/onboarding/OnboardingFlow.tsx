@@ -1,15 +1,137 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAppStore } from "@/lib/store";
 import { open } from "@tauri-apps/plugin-dialog";
-import { selectVault, setApiKey, reindex } from "@/lib/tauri";
-import { Check } from "lucide-react";
+import {
+  getConfig,
+  reindex,
+  selectVault,
+  setApiKey,
+  setEmbeddingModel,
+  setModel,
+  type Config,
+} from "@/lib/tauri";
+import { Check, FolderOpen } from "lucide-react";
 import Select from "@/components/ui/Select";
 import MeldLogo from "@/components/ui/MeldLogo";
+import WindowControls from "@/components/ui/WindowControls";
 import { setupEventListeners } from "@/lib/events";
 
 type Step = "welcome" | "folder" | "apikey" | "indexing" | "ready";
+
+const DEFAULT_CHAT_MODELS: Record<string, string> = {
+  openai: "gpt-5.2",
+  anthropic: "claude-sonnet-4-6",
+  google: "gemini-3.1-pro-preview",
+  openrouter: "qwen/qwen3-235b-a22b-thinking-2507",
+};
+
+const DEFAULT_EMBEDDING_MODELS: Record<string, string> = {
+  openai: "text-embedding-3-small",
+  google: "gemini-embedding-001",
+};
+
+const LLM_PROVIDER_PRIORITY = ["google", "openai", "anthropic", "openrouter"];
+const EMBEDDING_PROVIDER_PRIORITY = ["google", "openai"];
+
+const LEGACY_PROVIDER_KEY_FIELDS: Partial<Record<string, keyof Config>> = {
+  openai: "openai_api_key",
+  anthropic: "anthropic_api_key",
+  google: "google_api_key",
+};
+
+const EMBEDDING_KEY_REQUIRED_MESSAGE =
+  "Add an OpenAI or Google API key for embeddings before indexing.";
+
+function uniqueNonEmpty(values: string[]): string[] {
+  const unique: string[] = [];
+  for (const raw of values) {
+    const normalized = raw.trim().toLowerCase();
+    if (!normalized || unique.includes(normalized)) continue;
+    unique.push(normalized);
+  }
+  return unique;
+}
+
+function providerHasCredential(config: Config, provider: string): boolean {
+  const normalizedProvider = provider.trim().toLowerCase();
+  if (!normalizedProvider) return false;
+
+  if (config.auth_modes?.[normalizedProvider] === "oauth") {
+    const oauthTokens = config.oauth_tokens as Record<string, unknown> | undefined;
+    return Boolean(oauthTokens?.[normalizedProvider]);
+  }
+
+  const keyFromMap = config.api_keys?.[normalizedProvider];
+  const legacyField = LEGACY_PROVIDER_KEY_FIELDS[normalizedProvider];
+  const legacyValue =
+    legacyField && typeof config[legacyField] === "string"
+      ? config[legacyField]
+      : null;
+  const resolved = keyFromMap ?? legacyValue;
+  return typeof resolved === "string" && resolved.trim().length > 0;
+}
+
+function hasAnyLlmCredential(config: Config): boolean {
+  return LLM_PROVIDER_PRIORITY.some((provider) =>
+    providerHasCredential(config, provider),
+  );
+}
+
+function hasAnyEmbeddingCredential(config: Config): boolean {
+  return EMBEDDING_PROVIDER_PRIORITY.some((provider) =>
+    providerHasCredential(config, provider),
+  );
+}
+
+async function alignModelProviders(
+  config: Config,
+  preferredProvider?: string,
+): Promise<void> {
+  const preferred = preferredProvider?.trim().toLowerCase() ?? "";
+  const currentChatProvider = (
+    config.chat_provider?.trim().toLowerCase() || "openai"
+  );
+  const chatCandidates = uniqueNonEmpty([
+    preferred,
+    currentChatProvider,
+    ...LLM_PROVIDER_PRIORITY,
+  ]);
+  const resolvedChatProvider = chatCandidates.find((provider) =>
+    providerHasCredential(config, provider),
+  );
+  if (
+    resolvedChatProvider &&
+    resolvedChatProvider !== currentChatProvider &&
+    DEFAULT_CHAT_MODELS[resolvedChatProvider]
+  ) {
+    await setModel(resolvedChatProvider, DEFAULT_CHAT_MODELS[resolvedChatProvider]);
+  }
+
+  const currentEmbeddingProvider = (
+    config.embedding_provider?.trim().toLowerCase() || "openai"
+  );
+  const embeddingCandidates = uniqueNonEmpty([
+    preferred,
+    currentEmbeddingProvider,
+    ...EMBEDDING_PROVIDER_PRIORITY,
+  ]);
+  const resolvedEmbeddingProvider = embeddingCandidates.find(
+    (provider) =>
+      Boolean(DEFAULT_EMBEDDING_MODELS[provider]) &&
+      providerHasCredential(config, provider),
+  );
+  if (
+    resolvedEmbeddingProvider &&
+    resolvedEmbeddingProvider !== currentEmbeddingProvider
+  ) {
+    await setEmbeddingModel(
+      resolvedEmbeddingProvider,
+      DEFAULT_EMBEDDING_MODELS[resolvedEmbeddingProvider],
+    );
+  }
+}
 
 export default function OnboardingFlow() {
   const [step, setStep] = useState<Step>("welcome");
@@ -17,20 +139,59 @@ export default function OnboardingFlow() {
   const [provider, setProvider] = useState("openai");
   const [apiKey, setApiKeyValue] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [recentVaults, setRecentVaults] = useState<string[]>([]);
 
   const store = useAppStore();
 
-  async function handleSelectFolder() {
-    if (!folderPath.trim()) return;
-    setError(null);
+  useEffect(() => {
+    void getConfig().then((config) => {
+      const vaults = config.recent_vaults ?? [];
+      setRecentVaults(vaults);
+    });
+  }, []);
 
+  async function runInitialIndexing() {
+    setStep("indexing");
+    await setupEventListeners();
+    store.setIndexing(true);
     try {
-      const info = await selectVault(folderPath.trim());
+      await reindex();
+      setStep("ready");
+    } finally {
+      store.setIndexing(false);
+    }
+  }
+
+  async function connectVault(path: string) {
+    setError(null);
+    try {
+      const info = await selectVault(path.trim());
       store.setVaultPath(info.path, info.file_count);
-      setStep("apikey");
+      const config = await getConfig();
+      if (hasAnyLlmCredential(config)) {
+        if (!hasAnyEmbeddingCredential(config)) {
+          setStep("apikey");
+          setError(EMBEDDING_KEY_REQUIRED_MESSAGE);
+          return;
+        }
+        await alignModelProviders(config);
+        try {
+          await runInitialIndexing();
+        } catch (error) {
+          setStep("folder");
+          throw error;
+        }
+      } else {
+        setStep("apikey");
+      }
     } catch (e) {
       setError(String(e));
     }
+  }
+
+  async function handleSelectFolder() {
+    if (!folderPath.trim()) return;
+    await connectVault(folderPath);
   }
 
   async function handleSetApiKey() {
@@ -39,11 +200,14 @@ export default function OnboardingFlow() {
 
     try {
       await setApiKey(provider, apiKey.trim());
-      setStep("indexing");
-      await setupEventListeners();
-      store.setIndexing(true);
-      await reindex();
-      setStep("ready");
+      const config = await getConfig();
+      await alignModelProviders(config, provider);
+      if (!hasAnyEmbeddingCredential(config)) {
+        setError(EMBEDDING_KEY_REQUIRED_MESSAGE);
+        setStep("apikey");
+        return;
+      }
+      await runInitialIndexing();
     } catch (e) {
       setError(String(e));
       setStep("apikey");
@@ -54,11 +218,27 @@ export default function OnboardingFlow() {
     store.setOnboarded(true);
   }
 
+  const vaultBaseName = (path: string): string => {
+    const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
+    return normalized.split("/").pop() ?? path;
+  };
+
   return (
-    <div className="relative flex items-center justify-center h-full w-full bg-transparent">
-      {/* Drag surface — behind interactive content */}
-      <div data-tauri-drag-region className="absolute inset-0" />
-      <div className="relative z-10 w-full max-w-md p-8 space-y-8">
+    <div className="relative flex h-full w-full rounded-[28px] bg-bg border border-overlay-6 overflow-hidden">
+      {/* Window controls */}
+      <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between min-h-[44px]">
+        <div data-tauri-drag-region className="absolute inset-0" />
+        <div className="relative z-10">
+          <WindowControls placement="left" />
+        </div>
+        <div className="relative z-10 mr-2">
+          <WindowControls placement="right" />
+        </div>
+      </div>
+      <div className="relative flex flex-1 items-center justify-center">
+        {/* Drag surface — behind interactive content */}
+        <div data-tauri-drag-region className="absolute inset-0" />
+        <div className="relative z-10 w-full max-w-md p-8 space-y-8">
         {step === "welcome" && (
           <div className="space-y-6 text-center">
             <MeldLogo size={64} className="mx-auto rounded-2xl" />
@@ -109,6 +289,30 @@ export default function OnboardingFlow() {
             >
               Continue
             </button>
+
+            {recentVaults.length > 0 && (
+              <div className="pt-2 space-y-2">
+                <p className="text-[11px] font-medium uppercase tracking-wider text-text-muted/70">
+                  Recent vaults
+                </p>
+                <div className="space-y-1">
+                  {recentVaults.map((vault) => (
+                    <button
+                      key={vault}
+                      type="button"
+                      onClick={() => void connectVault(vault)}
+                      className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-bg-secondary group"
+                    >
+                      <FolderOpen className="h-4 w-4 shrink-0 text-text-muted group-hover:text-accent/70" strokeWidth={1.5} />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm text-text truncate">{vaultBaseName(vault)}</p>
+                        <p className="text-[11px] text-text-muted truncate">{vault}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -190,6 +394,7 @@ export default function OnboardingFlow() {
             </button>
           </div>
         )}
+      </div>
       </div>
     </div>
   );

@@ -8,6 +8,7 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
 use crate::adapters::config::Settings;
+use crate::adapters::providers::split_model_id;
 
 use super::shared::{resolve_provider_credential, IndexProgress};
 
@@ -20,6 +21,62 @@ struct VaultWatcherHandle {
 
 static VAULT_WATCHER: LazyLock<Mutex<Option<VaultWatcherHandle>>> =
     LazyLock::new(|| Mutex::new(None));
+const EMBEDDING_MAX_ATTEMPTS: usize = 3;
+
+fn default_embedding_model_id_for_provider(provider: &str) -> Option<&'static str> {
+    match provider {
+        "google" => Some("google:gemini-embedding-001"),
+        "openai" => Some("openai:text-embedding-3-small"),
+        _ => None,
+    }
+}
+
+fn resolve_embedding_model_id_for_reindex(
+    current_provider: &str,
+    current_model_id: &str,
+    candidate_provider: &str,
+) -> Option<String> {
+    if candidate_provider.eq_ignore_ascii_case(current_provider) {
+        if let Ok((provider, model)) = split_model_id(current_model_id) {
+            let normalized_model = model.trim();
+            if provider.eq_ignore_ascii_case(candidate_provider) && !normalized_model.is_empty() {
+                return Some(format!(
+                    "{}:{}",
+                    candidate_provider.to_ascii_lowercase(),
+                    normalized_model
+                ));
+            }
+        }
+    }
+
+    default_embedding_model_id_for_provider(candidate_provider).map(str::to_string)
+}
+
+async fn embed_chunk_with_retry(
+    api_key: &str,
+    embedding_model_id: &str,
+    content: &str,
+) -> Result<Vec<f32>, String> {
+    let mut attempt = 1usize;
+    loop {
+        match crate::adapters::embeddings::get_embedding(api_key, embedding_model_id, content).await
+        {
+            Ok(embedding) => return Ok(embedding),
+            Err(error) => {
+                if attempt >= EMBEDDING_MAX_ATTEMPTS {
+                    return Err(error.to_string());
+                }
+                let backoff_ms = 200_u64.saturating_mul(1_u64 << (attempt - 1));
+                log::warn!(
+                    "Embedding request failed (attempt {attempt}/{EMBEDDING_MAX_ATTEMPTS}), retrying in {backoff_ms}ms: {}",
+                    error
+                );
+                tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+                attempt += 1;
+            }
+        }
+    }
+}
 
 fn is_markdown_watch_path(vault_root: &Path, path: &Path) -> bool {
     let relative = match path.strip_prefix(vault_root) {
@@ -126,6 +183,7 @@ pub(crate) fn ensure_vault_watcher(app: &AppHandle) {
                             runtime.spawn(async move {
                                 if let Err(error) = run_reindex_internal(&app_for_reindex).await {
                                     log::warn!("Auto reindex failed: {}", error);
+                                    let _ = app_for_reindex.emit("index:error", error);
                                 }
                             });
                         }
@@ -194,9 +252,64 @@ pub(crate) async fn run_reindex_internal(app: &AppHandle) -> Result<(), String> 
             return Ok(());
         }
 
-        let embedding_provider = settings.embedding_provider();
-        let api_key = resolve_provider_credential(&mut settings, &embedding_provider).await?;
-        let embedding_model_id = settings.embedding_model_id();
+        let current_embedding_provider = settings.embedding_provider();
+        let current_embedding_model_id = settings.embedding_model_id();
+
+        let mut provider_candidates = Vec::with_capacity(3);
+        for provider in [
+            current_embedding_provider.clone(),
+            "google".to_string(),
+            "openai".to_string(),
+        ] {
+            let normalized = provider.trim().to_ascii_lowercase();
+            if normalized.is_empty()
+                || provider_candidates
+                    .iter()
+                    .any(|existing: &String| existing == &normalized)
+            {
+                continue;
+            }
+            provider_candidates.push(normalized);
+        }
+
+        let mut selected_embedding: Option<(String, String, String)> = None;
+        for provider in &provider_candidates {
+            let Some(model_id) = resolve_embedding_model_id_for_reindex(
+                &current_embedding_provider,
+                &current_embedding_model_id,
+                provider,
+            ) else {
+                continue;
+            };
+
+            match resolve_provider_credential(&mut settings, provider).await {
+                Ok(api_key) => {
+                    selected_embedding = Some((provider.clone(), api_key, model_id));
+                    break;
+                }
+                Err(error) => {
+                    log::debug!(
+                        "Embedding provider '{}' unavailable for reindex: {}",
+                        provider,
+                        error
+                    );
+                }
+            }
+        }
+
+        let (embedding_provider, api_key, embedding_model_id) = selected_embedding.ok_or_else(|| {
+            format!(
+                "No embedding credentials configured for reindex. Configure credentials for '{}', 'google', or 'openai'.",
+                current_embedding_provider.trim().to_ascii_lowercase()
+            )
+        })?;
+        if !embedding_provider.eq_ignore_ascii_case(&current_embedding_provider) {
+            log::warn!(
+                "Reindex falling back from embedding provider '{}' to '{}' due to available credentials.",
+                current_embedding_provider,
+                embedding_provider
+            );
+        }
         let total = files.len();
 
         for (i, file) in files.iter().enumerate() {
@@ -223,33 +336,22 @@ pub(crate) async fn run_reindex_internal(app: &AppHandle) -> Result<(), String> 
             }
 
             let chunks = crate::adapters::markdown::chunk_markdown(&content, 512, 50);
-
-            db.remove_file_chunks(&rel_path)
-                .map_err(|e| e.to_string())?;
+            let mut prepared_chunks = Vec::with_capacity(chunks.len());
 
             for (idx, chunk) in chunks.iter().enumerate() {
-                let embedding = crate::adapters::embeddings::get_embedding(
-                    &api_key,
-                    &embedding_model_id,
-                    &chunk.content,
-                )
-                .await
-                .map_err(|e| e.to_string())?;
-
-                db.insert_chunk(
-                    &rel_path,
-                    idx,
-                    chunk.heading_path.as_deref(),
-                    &chunk.content,
-                    chunk.char_start,
-                    chunk.char_end,
-                    &hash,
-                    &embedding,
-                )
-                .map_err(|e| e.to_string())?;
+                let embedding =
+                    embed_chunk_with_retry(&api_key, &embedding_model_id, &chunk.content).await?;
+                prepared_chunks.push(crate::adapters::vectordb::PreparedChunkEmbedding {
+                    chunk_index: idx,
+                    heading_path: chunk.heading_path.clone(),
+                    content: chunk.content.clone(),
+                    char_start: chunk.char_start,
+                    char_end: chunk.char_end,
+                    embedding,
+                });
             }
 
-            db.upsert_file(&rel_path, &hash, chunks.len())
+            db.replace_file_chunks_atomically(&rel_path, &hash, &prepared_chunks)
                 .map_err(|e| e.to_string())?;
         }
 

@@ -4,7 +4,6 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { X } from "lucide-react";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
-import { open } from "@tauri-apps/plugin-dialog";
 import { useAppStore } from "@/lib/store";
 import ComboSelect, { type ComboOption } from "@/components/ui/ComboSelect";
 import {
@@ -18,49 +17,25 @@ import {
   setSearchProvider,
   setSearxngBaseUrl,
   reindex,
-  selectVault,
   openDevtools,
   type ProviderCatalogEntry,
 } from "@/lib/tauri";
-
-const KNOWN_MODELS: Record<string, ComboOption[]> = {
-  openai: [
-    { value: "gpt-5.2", label: "GPT-5.2" },
-    { value: "gpt-5.1", label: "GPT-5.1" },
-    { value: "gpt-5", label: "GPT-5" },
-    { value: "gpt-5-nano", label: "GPT-5 Nano" },
-  ],
-  anthropic: [
-    { value: "claude-opus-4-6", label: "Claude Opus 4.6" },
-    { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
-    { value: "claude-sonnet-4-5-20250929", label: "Claude Sonnet 4.5" },
-    { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
-  ],
-  google: [
-    { value: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro" },
-    { value: "gemini-3-pro-preview", label: "Gemini 3 Pro" },
-    { value: "gemini-3-flash-preview", label: "Gemini 3 Flash" },
-  ],
-  openrouter: [
-    { value: "deepseek/deepseek-r1-0528:free", label: "DeepSeek R1", badge: "Free" },
-    { value: "qwen/qwen3-coder:free", label: "Qwen3 Coder", badge: "Free" },
-    { value: "qwen/qwen3-235b-a22b-thinking-2507", label: "Qwen3 235B Thinking", badge: "Free" },
-    { value: "meta-llama/llama-3.3-70b-instruct:free", label: "Llama 3.3 70B", badge: "Free" },
-    { value: "nousresearch/hermes-3-llama-3.1-405b:free", label: "Hermes 3 405B", badge: "Free" },
-    { value: "google/gemma-3-27b-it:free", label: "Gemma 3 27B", badge: "Free" },
-    { value: "mistralai/mistral-small-3.1-24b-instruct:free", label: "Mistral Small 3.1", badge: "Free" },
-    { value: "nvidia/nemotron-3-nano-30b-a3b:free", label: "Nemotron 3 Nano 30B", badge: "Free" },
-  ],
-};
+import {
+  KNOWN_CHAT_MODELS,
+  buildChatProviderOptions,
+} from "@/lib/chatModelOptions";
+import {
+  DEFAULT_EMBEDDING_MODELS as DEFAULT_INDEX_EMBEDDING_MODELS,
+  resolveEmbeddingProviderForIndexing,
+} from "@/lib/providerCredentials";
+import { buildIndexingDisabledToast, buildReindexErrorToast } from "@/lib/chatErrors";
 
 const KNOWN_EMBEDDING_MODELS: Record<string, ComboOption[]> = {
   openai: [
     { value: "text-embedding-3-small", label: "text-embedding-3-small" },
     { value: "text-embedding-3-large", label: "text-embedding-3-large" },
   ],
-  google: [
-    { value: "gemini-embedding-001", label: "gemini-embedding-001" },
-  ],
+  google: [{ value: "gemini-embedding-001", label: "gemini-embedding-001" }],
 };
 
 const FALLBACK_OPTIONS: ComboOption[] = [
@@ -80,11 +55,10 @@ export default function SettingsPanel() {
   const [embeddingModelId, setEmbeddingModelIdLocal] = useState("");
   const [userLanguage, setUserLanguageLocal] = useState("");
   const [searchProviderLocal, setSearchProviderLocal] = useState("tavily");
-  const [searxngUrlLocal, setSearxngUrlLocal] = useState("http://localhost:8080");
-  const [theme, setThemeLocal] = useState<string>(() => {
-    if (typeof window === "undefined") return "dark";
-    return localStorage.getItem("meld.theme") || "dark";
-  });
+  const [searxngUrlLocal, setSearxngUrlLocal] = useState(
+    "http://localhost:8080",
+  );
+  const [theme, setThemeLocal] = useState<string>("dark");
   const [reindexError, setReindexError] = useState<string | null>(null);
   const [updateStatus, setUpdateStatus] = useState<
     "idle" | "checking" | "available" | "downloading" | "upToDate" | "error"
@@ -129,7 +103,9 @@ export default function SettingsPanel() {
         } else if (event.event === "Progress") {
           downloadedBytes += event.data.chunkLength;
           if (totalBytes > 0) {
-            setDownloadProgress(Math.round((downloadedBytes / totalBytes) * 100));
+            setDownloadProgress(
+              Math.round((downloadedBytes / totalBytes) * 100),
+            );
           }
         }
       });
@@ -153,7 +129,8 @@ export default function SettingsPanel() {
       if (config.fallback_chat_model_id)
         setFallbackModelIdLocal(config.fallback_chat_model_id);
       if (config.user_language) setUserLanguageLocal(config.user_language);
-      if (config.search_provider) setSearchProviderLocal(config.search_provider);
+      if (config.search_provider)
+        setSearchProviderLocal(config.search_provider);
       if (config.searxng_base_url) setSearxngUrlLocal(config.searxng_base_url);
 
       const keys: Record<string, string> = {};
@@ -171,6 +148,14 @@ export default function SettingsPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const storedTheme = localStorage.getItem("meld.theme");
+    const themeFromDom = document.documentElement.getAttribute("data-theme");
+    const resolvedTheme = storedTheme || themeFromDom || "dark";
+    setThemeLocal(resolvedTheme);
+  }, []);
+
   function handleSetTheme(value: string) {
     setThemeLocal(value);
     localStorage.setItem("meld.theme", value);
@@ -184,15 +169,40 @@ export default function SettingsPanel() {
   }
 
   async function handleReindex() {
-    store.setIndexing(true);
     setReindexError(null);
+
+    try {
+      const config = await getConfig();
+      const resolvedEmbeddingProvider = resolveEmbeddingProviderForIndexing(config);
+      const currentEmbeddingProvider =
+        config.embedding_provider?.trim().toLowerCase() || "openai";
+
+      if (!resolvedEmbeddingProvider) {
+        const toast = buildIndexingDisabledToast();
+        store.showToast(toast.message, toast.options);
+        setReindexError(toast.message);
+        return;
+      }
+
+      if (resolvedEmbeddingProvider !== currentEmbeddingProvider) {
+        const modelId = DEFAULT_INDEX_EMBEDDING_MODELS[resolvedEmbeddingProvider];
+        await setEmbeddingModel(resolvedEmbeddingProvider, modelId);
+        store.setEmbeddingProvider(resolvedEmbeddingProvider);
+        setEmbeddingProviderLocal(resolvedEmbeddingProvider);
+        setEmbeddingModelIdLocal(modelId);
+      }
+    } catch (prepError) {
+      console.error("Failed to prepare reindex:", prepError);
+    }
+
+    store.setIndexing(true);
     try {
       await reindex();
     } catch (e) {
       console.error("Reindex failed:", e);
-      setReindexError(
-        `Reindex failed: ${e instanceof Error ? e.message : String(e)}`
-      );
+      const toast = buildReindexErrorToast(e);
+      store.showToast(toast.message, toast.options);
+      setReindexError(toast.message);
     }
     store.setIndexing(false);
   }
@@ -201,17 +211,7 @@ export default function SettingsPanel() {
   const embeddingProviders = providers.filter((p) => p.supports_embeddings);
 
   const providerOptions: ComboOption[] = useMemo(() => {
-    if (llmProviders.length > 0) {
-      return llmProviders.map((p) => ({ value: p.id, label: p.display_name }));
-    }
-    return [
-      { value: "openai", label: "OpenAI" },
-      { value: "anthropic", label: "Anthropic" },
-      { value: "google", label: "Google Gemini" },
-      { value: "openrouter", label: "OpenRouter" },
-      { value: "ollama", label: "Ollama" },
-      { value: "lm_studio", label: "LM Studio" },
-    ];
+    return buildChatProviderOptions(llmProviders);
   }, [llmProviders]);
 
   const embeddingProviderOptions: ComboOption[] = useMemo(() => {
@@ -228,7 +228,7 @@ export default function SettingsPanel() {
   }, [embeddingProviders]);
 
   const modelOptions = useMemo(
-    () => KNOWN_MODELS[store.chatProvider] ?? [],
+    () => KNOWN_CHAT_MODELS[store.chatProvider] ?? [],
     [store.chatProvider],
   );
 
@@ -236,6 +236,8 @@ export default function SettingsPanel() {
     () => KNOWN_EMBEDDING_MODELS[embeddingProvider] ?? [],
     [embeddingProvider],
   );
+
+  const themeSliderIndex = theme === "auto" ? 1 : theme === "light" ? 2 : 0;
 
   return (
     <div className="p-6 space-y-8 h-full overflow-y-auto scrollbar-visible max-w-xl mx-auto">
@@ -254,14 +256,9 @@ export default function SettingsPanel() {
         <h3 className="text-sm font-medium text-text-secondary">Appearance</h3>
         <div className="relative grid grid-cols-3 rounded-[20px] border border-overlay-6 bg-overlay-3 p-1.5">
           <div
-            className="absolute left-1.5 top-1.5 bottom-1.5 w-[calc(33.333%-4px)] rounded-[14px] bg-overlay-8 transition-transform duration-200 ease-out"
+            className="absolute left-1.5 top-1.5 bottom-1.5 w-[calc((100%-12px)/3)] rounded-[14px] bg-overlay-8 transition-transform duration-200 ease-out"
             style={{
-              transform:
-                theme === "dark"
-                  ? "translateX(0)"
-                  : theme === "auto"
-                    ? "translateX(calc(100% + 6px))"
-                    : "translateX(calc(200% + 12px))",
+              transform: `translateX(${themeSliderIndex * 100}%)`,
             }}
           />
           {(["dark", "auto", "light"] as const).map((option) => (
@@ -275,7 +272,11 @@ export default function SettingsPanel() {
                   : "text-text-muted hover:text-text-secondary"
               }`}
             >
-              {option === "auto" ? "Auto" : option === "dark" ? "Dark" : "Light"}
+              {option === "auto"
+                ? "Auto"
+                : option === "dark"
+                  ? "Dark"
+                  : "Light"}
             </button>
           ))}
         </div>
@@ -288,20 +289,10 @@ export default function SettingsPanel() {
         <p className="text-xs text-text-muted">{store.fileCount} notes</p>
         <div className="flex gap-2">
           <button
-            onClick={async () => {
-              const selected = await open({ directory: true, multiple: false });
-              if (selected) {
-                try {
-                  const info = await selectVault(selected);
-                  store.setVaultPath(info.path, info.file_count);
-                } catch (e) {
-                  setReindexError(String(e));
-                }
-              }
-            }}
+            onClick={() => store.openVaultSwitcher()}
             className="text-xs px-3.5 py-2 border border-overlay-6 bg-bg-tertiary/60 rounded-xl hover:bg-bg-tertiary hover:border-overlay-10 transition-colors"
           >
-            Change vault
+            Manage vaults
           </button>
           <button
             onClick={handleReindex}
@@ -310,11 +301,9 @@ export default function SettingsPanel() {
           >
             {store.isIndexing ? "Indexing..." : "Reindex"}
           </button>
-        </div>    
+        </div>
         {reindexError && (
-          <p className="text-error text-xs mt-2">
-            {reindexError}
-          </p>
+          <p className="text-error text-xs mt-2">{reindexError}</p>
         )}
       </section>
 
@@ -372,8 +361,7 @@ export default function SettingsPanel() {
           onChange={(val) => {
             setEmbeddingProviderLocal(val);
             store.setEmbeddingProvider(val);
-            const defaultModel =
-              KNOWN_EMBEDDING_MODELS[val]?.[0]?.value ?? "";
+            const defaultModel = KNOWN_EMBEDDING_MODELS[val]?.[0]?.value ?? "";
             if (defaultModel) {
               setEmbeddingModelIdLocal(defaultModel);
               setEmbeddingModel(val, defaultModel);
@@ -456,47 +444,53 @@ export default function SettingsPanel() {
       <section className="space-y-3">
         <h3 className="text-sm font-medium text-text-secondary">API Keys</h3>
 
-        {["openai", "anthropic", "google", "openrouter", "tavily", "brave"].map((provider) => (
-          <div key={provider} className="space-y-1">
-            <label className="text-xs text-text-muted capitalize">
-              {provider === "openrouter" ? "OpenRouter" : provider === "brave" ? "Brave Search" : provider}
-            </label>
-            <div className="flex gap-1">
-              <input
-                type="password"
-                value={apiKeys[provider] ?? ""}
-                onChange={(e) =>
-                  setApiKeysState((prev) => ({
-                    ...prev,
-                    [provider]: e.target.value,
-                  }))
-                }
-                placeholder={
-                  provider === "openai"
-                    ? "sk-..."
-                    : provider === "anthropic"
-                      ? "sk-ant-..."
-                      : provider === "google"
-                        ? "AIza..."
-                        : provider === "openrouter"
-                          ? "sk-or-..."
-                          : provider === "brave"
-                            ? "BSA..."
-                            : "tvly-..."
-                }
-                className="flex-1 p-2 text-sm bg-overlay-3 border border-border/50 rounded-xl text-text placeholder:text-text-muted focus:outline-none focus:border-border-focus focus:bg-bg focus:shadow-[0_0_0_1px_var(--color-border-focus)]"
-              />
-              <button
-                onClick={() =>
-                  handleSaveKey(provider, apiKeys[provider] ?? "")
-                }
-                className="px-3 text-xs border border-overlay-6 bg-bg-tertiary/60 rounded-xl hover:bg-bg-tertiary hover:border-overlay-10 transition-colors"
-              >
-                Save
-              </button>
+        {["openai", "anthropic", "google", "openrouter", "tavily", "brave"].map(
+          (provider) => (
+            <div key={provider} className="space-y-1">
+              <label className="text-xs text-text-muted capitalize">
+                {provider === "openrouter"
+                  ? "OpenRouter"
+                  : provider === "brave"
+                    ? "Brave Search"
+                    : provider}
+              </label>
+              <div className="flex gap-1">
+                <input
+                  type="password"
+                  value={apiKeys[provider] ?? ""}
+                  onChange={(e) =>
+                    setApiKeysState((prev) => ({
+                      ...prev,
+                      [provider]: e.target.value,
+                    }))
+                  }
+                  placeholder={
+                    provider === "openai"
+                      ? "sk-..."
+                      : provider === "anthropic"
+                        ? "sk-ant-..."
+                        : provider === "google"
+                          ? "AIza..."
+                          : provider === "openrouter"
+                            ? "sk-or-..."
+                            : provider === "brave"
+                              ? "BSA..."
+                              : "tvly-..."
+                  }
+                  className="flex-1 p-2 text-sm bg-overlay-3 border border-border/50 rounded-xl text-text placeholder:text-text-muted focus:outline-none focus:border-border-focus focus:bg-bg focus:shadow-[0_0_0_1px_var(--color-border-focus)]"
+                />
+                <button
+                  onClick={() =>
+                    handleSaveKey(provider, apiKeys[provider] ?? "")
+                  }
+                  className="px-3 text-xs border border-overlay-6 bg-bg-tertiary/60 rounded-xl hover:bg-bg-tertiary hover:border-overlay-10 transition-colors"
+                >
+                  Save
+                </button>
+              </div>
             </div>
-          </div>
-        ))}
+          ),
+        )}
 
         {saved && <p className="text-xs text-success">Saved</p>}
       </section>
@@ -517,12 +511,15 @@ export default function SettingsPanel() {
             <p className="text-xs text-text-muted">Checking for updates...</p>
           )}
           {updateStatus === "upToDate" && (
-            <p className="text-xs text-text-muted">You&apos;re on the latest version.</p>
+            <p className="text-xs text-text-muted">
+              You&apos;re on the latest version.
+            </p>
           )}
           {updateStatus === "available" && updateInfo && (
             <div className="space-y-1">
               <p className="text-xs text-text">
-                Update available: <span className="font-medium">{updateInfo.version}</span>
+                Update available:{" "}
+                <span className="font-medium">{updateInfo.version}</span>
               </p>
               <button
                 onClick={handleInstallUpdate}
@@ -534,7 +531,8 @@ export default function SettingsPanel() {
           )}
           {updateStatus === "downloading" && (
             <p className="text-xs text-text-muted">
-              Downloading...{downloadProgress !== null ? ` ${downloadProgress}%` : ""}
+              Downloading...
+              {downloadProgress !== null ? ` ${downloadProgress}%` : ""}
             </p>
           )}
           {updateStatus === "error" && (

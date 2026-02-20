@@ -30,6 +30,21 @@ export interface ConversationPayload {
   archived?: boolean;
   pinned?: boolean;
   sort_order?: number | null;
+  folder_id?: string | null;
+}
+
+export interface FolderPayload {
+  id: string;
+  name: string;
+  icon: string | null;
+  custom_instruction: string | null;
+  default_model_id: string | null;
+  parent_id: string | null;
+  pinned: boolean;
+  archived: boolean;
+  sort_order: number | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ConversationMessagePayload {
@@ -66,6 +81,7 @@ export interface Config {
   retrieval_rerank_top_k: number;
   search_provider: string | null;
   searxng_base_url: string | null;
+  recent_vaults: string[];
   openai_api_key: string | null;
   anthropic_api_key: string | null;
   google_api_key: string | null;
@@ -264,10 +280,12 @@ export async function exportConversation(
 export async function sendMessage(
   message: string,
   conversationId?: string | null,
+  folderId?: string | null,
 ): Promise<SendMessageResponse> {
   return invoke<SendMessageResponse>("send_message", {
     message,
     conversationId: conversationId ?? null,
+    folderId: folderId ?? null,
   });
 }
 
@@ -392,6 +410,99 @@ export async function setSearchProvider(provider: string): Promise<void> {
 
 export async function setSearxngBaseUrl(url: string): Promise<void> {
   return invoke("set_searxng_base_url", { url });
+}
+
+/* ── Chat Folders ──────────────────────────────────────── */
+
+export async function createChatFolder(
+  name?: string,
+  parentId?: string | null,
+): Promise<string> {
+  return invoke<string>("create_chat_folder", {
+    name: name ?? null,
+    parentId: parentId ?? null,
+  });
+}
+
+export async function getChatFolder(
+  folderId: string,
+): Promise<FolderPayload> {
+  return invoke<FolderPayload>("get_chat_folder", { folderId });
+}
+
+export async function listChatFolders(): Promise<FolderPayload[]> {
+  return invoke<FolderPayload[]>("list_chat_folders");
+}
+
+export async function renameChatFolder(
+  folderId: string,
+  name: string,
+): Promise<void> {
+  return invoke("rename_chat_folder", { folderId, name });
+}
+
+export async function updateChatFolder(
+  folderId: string,
+  icon?: string | null,
+  customInstruction?: string | null,
+  defaultModelId?: string | null,
+): Promise<void> {
+  return invoke("update_chat_folder", {
+    folderId,
+    icon: icon ?? null,
+    customInstruction: customInstruction ?? null,
+    defaultModelId: defaultModelId ?? null,
+  });
+}
+
+export async function archiveChatFolder(folderId: string): Promise<void> {
+  return invoke("archive_chat_folder", { folderId });
+}
+
+export async function unarchiveChatFolder(folderId: string): Promise<void> {
+  return invoke("unarchive_chat_folder", { folderId });
+}
+
+export async function pinChatFolder(folderId: string): Promise<void> {
+  return invoke("pin_chat_folder", { folderId });
+}
+
+export async function unpinChatFolder(folderId: string): Promise<void> {
+  return invoke("unpin_chat_folder", { folderId });
+}
+
+export async function moveChatFolder(
+  folderId: string,
+  newParentId?: string | null,
+): Promise<void> {
+  return invoke("move_chat_folder", {
+    folderId,
+    newParentId: newParentId ?? null,
+  });
+}
+
+export async function setConversationFolder(
+  conversationId: string,
+  folderId?: string | null,
+): Promise<void> {
+  return invoke("set_conversation_folder", {
+    conversationId,
+    folderId: folderId ?? null,
+  });
+}
+
+export async function getFolderInstructionChain(
+  folderId: string,
+): Promise<string[]> {
+  return invoke<string[]>("get_folder_instruction_chain", { folderId });
+}
+
+export async function migrateChatFoldersFromLocal(
+  json: string,
+): Promise<Record<string, string>> {
+  return invoke<Record<string, string>>("migrate_chat_folders_from_local", {
+    json,
+  });
 }
 
 /* ── History ───────────────────────────────────────────── */

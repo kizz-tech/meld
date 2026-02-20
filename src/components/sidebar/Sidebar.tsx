@@ -10,27 +10,29 @@ import {
 import { createPortal } from "react-dom";
 import { useShallow } from "zustand/react/shallow";
 import { save } from "@tauri-apps/plugin-dialog";
-import { useAppStore, type Conversation } from "@/lib/store";
+import { useAppStore, type Conversation, type Folder } from "@/lib/store";
 import { exportConversation } from "@/lib/tauri";
-import { ChevronsLeft, ChevronsRight } from "lucide-react";
+import { ChevronsLeft, ChevronsRight, MessageSquare, BookOpen } from "lucide-react";
 import WindowControls from "@/components/ui/WindowControls";
 import type { VaultEntry } from "@/lib/tauri";
 import VaultBrowser from "@/components/vault/VaultBrowser";
 import TreeSurface from "@/components/tree/TreeSurface";
 import { useTreeDndState } from "@/components/tree/useTreeDndState";
 import { useTreeContextMenu } from "@/features/shared/tree/useTreeContextMenu";
+import { normalizeRelativePath } from "@/features/shared/tree/vaultTree";
 import ConversationRow, { type ConversationRowHandlers } from "./ConversationRow";
 import ChatFolderRow, { type ChatFolderRowHandlers } from "./ChatFolderRow";
 
 interface SidebarProps {
   conversations: Conversation[];
+  folders: Folder[];
   activeConversationId: Conversation["id"] | null;
   vaultEntries: VaultEntry[];
   loadingVaultFiles: boolean;
   activeNotePath: string | null;
   onSelectConversation: (conversationId: Conversation["id"]) => void;
   onSelectNote: (notePath: string) => void;
-  onNewChat: () => void;
+  onNewChat: (folderId?: string | null) => void;
   onRenameConversation: (
     conversationId: Conversation["id"],
     title: string,
@@ -50,28 +52,21 @@ interface SidebarProps {
   onUnpinConversation: (
     conversationId: Conversation["id"],
   ) => Promise<void> | void;
+  onCreateChatFolder: (parentId: string | null) => Promise<string>;
+  onRenameChatFolder: (folderId: string, name: string) => Promise<void>;
+  onArchiveChatFolder: (folderId: string) => Promise<void>;
+  onPinChatFolder: (folderId: string) => Promise<void>;
+  onUnpinChatFolder: (folderId: string) => Promise<void>;
+  onMoveChatFolder: (folderId: string, newParentId: string | null) => Promise<void>;
+  onSetConversationFolder: (conversationId: string, folderId: string | null) => Promise<void>;
+  onOpenFolderSettings: (folderId: string) => void;
   onCreateKbNote: (path: string) => Promise<void> | void;
   onCreateKbFolder: (path: string) => Promise<void> | void;
   onArchiveKbEntry: (path: string) => Promise<void> | void;
   onMoveKbEntry: (fromPath: string, toPath: string) => Promise<void> | void;
 }
 
-const CHAT_LAYOUT_STORAGE_KEY = "meld.chat-layout.v1";
-
-interface ChatFolder {
-  id: string;
-  name: string;
-  parentId: string | null;
-  pinned: boolean;
-  archived: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
-
-interface ChatLayoutSnapshot {
-  folders: ChatFolder[];
-  assignments: Record<string, string>;
-}
+type ChatFolder = Folder;
 
 interface ContextMenuTarget {
   kind: "conversation" | "folder" | "root";
@@ -136,26 +131,9 @@ const sortFoldersByRecent = (items: ChatFolder[]): ChatFolder[] => {
   });
 };
 
-const nowIso = (): string => new Date().toISOString();
-
-const generateFolderId = (): string =>
-  `folder_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-
-const createFolderName = (existingNames: Set<string>): string => {
-  if (!existingNames.has("New folder")) return "New folder";
-  let index = 2;
-  while (existingNames.has(`New folder ${index}`)) {
-    index += 1;
-  }
-  return `New folder ${index}`;
-};
-
-const normalizeVaultPath = (value: string): string =>
-  value.replace(/\\/g, "/").replace(/^\/+/, "").trim();
-
 const createKnowledgeNoteName = (entries: VaultEntry[]): string => {
   const existing = new Set(
-    entries.map((entry) => normalizeVaultPath(entry.relative_path).toLowerCase()),
+    entries.map((entry) => normalizeRelativePath(entry.relative_path).toLowerCase()),
   );
 
   let index = 1;
@@ -171,7 +149,7 @@ const createKnowledgeNoteName = (entries: VaultEntry[]): string => {
 
 const createKnowledgeFolderName = (entries: VaultEntry[]): string => {
   const existing = new Set(
-    entries.map((entry) => normalizeVaultPath(entry.relative_path).toLowerCase()),
+    entries.map((entry) => normalizeRelativePath(entry.relative_path).toLowerCase()),
   );
 
   let index = 1;
@@ -183,57 +161,6 @@ const createKnowledgeFolderName = (entries: VaultEntry[]): string => {
     }
     index += 1;
   }
-};
-
-const loadChatLayoutSnapshot = (): ChatLayoutSnapshot => {
-  if (typeof window === "undefined") {
-    return { folders: [], assignments: {} };
-  }
-
-  try {
-    const raw = window.localStorage.getItem(CHAT_LAYOUT_STORAGE_KEY);
-    if (!raw) return { folders: [], assignments: {} };
-    const parsed = JSON.parse(raw) as Partial<ChatLayoutSnapshot>;
-
-    const folders = Array.isArray(parsed.folders)
-      ? parsed.folders
-        .filter((item): item is ChatFolder => {
-          if (!item || typeof item !== "object") return false;
-          const candidate = item as Partial<ChatFolder>;
-          return (
-            typeof candidate.id === "string" &&
-            typeof candidate.name === "string" &&
-            (candidate.parentId === null || typeof candidate.parentId === "string")
-          );
-        })
-        .map((item) => ({
-          id: item.id,
-          name: item.name.trim() || "Untitled folder",
-          parentId: item.parentId,
-          pinned: Boolean(item.pinned),
-          archived: Boolean(item.archived),
-          createdAt: item.createdAt || nowIso(),
-          updatedAt: item.updatedAt || item.createdAt || nowIso(),
-        }))
-      : [];
-
-    const assignments: Record<string, string> = Object.create(null);
-    if (parsed.assignments && typeof parsed.assignments === "object") {
-      for (const [key, value] of Object.entries(parsed.assignments)) {
-        if (typeof value !== "string" || !value.trim()) continue;
-        assignments[key] = value;
-      }
-    }
-
-    return { folders, assignments };
-  } catch {
-    return { folders: [], assignments: {} };
-  }
-};
-
-const saveChatLayoutSnapshot = (snapshot: ChatLayoutSnapshot): void => {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(CHAT_LAYOUT_STORAGE_KEY, JSON.stringify(snapshot));
 };
 
 const getFolderDescendants = (folders: ChatFolder[], rootId: string): Set<string> => {
@@ -253,6 +180,7 @@ const getFolderDescendants = (folders: ChatFolder[], rootId: string): Set<string
 
 export default function Sidebar({
   conversations,
+  folders,
   activeConversationId,
   vaultEntries,
   loadingVaultFiles,
@@ -266,6 +194,14 @@ export default function Sidebar({
   onUnarchiveConversation,
   onPinConversation,
   onUnpinConversation,
+  onCreateChatFolder,
+  onRenameChatFolder,
+  onArchiveChatFolder,
+  onPinChatFolder,
+  onUnpinChatFolder,
+  onMoveChatFolder,
+  onSetConversationFolder,
+  onOpenFolderSettings,
   onCreateKbNote,
   onCreateKbFolder,
   onArchiveKbEntry,
@@ -287,15 +223,8 @@ export default function Sidebar({
     menuDataAttribute: "data-sidebar-context-menu",
   });
 
-  const [chatFolders, setChatFolders] = useState<ChatFolder[]>([]);
-  const [conversationFolders, setConversationFolders] = useState<Record<string, string>>(
-    Object.create(null),
-  );
+  const chatFolders = folders;
   const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(new Set());
-  const [pendingFolderForNewChat, setPendingFolderForNewChat] = useState<string | null>(
-    null,
-  );
-  const chatLayoutLoadedRef = useRef(false);
 
   const [editingConversationId, setEditingConversationId] = useState<
     Conversation["id"] | null
@@ -314,30 +243,21 @@ export default function Sidebar({
   } = useTreeDndState<ChatDragEntity, ChatDropTarget>();
   const draggingEntityRef = useRef<ChatDragEntity | null>(null);
 
+  // Auto-expand root folders on first load
+  const foldersInitRef = useRef(false);
   useEffect(() => {
-    const snapshot = loadChatLayoutSnapshot();
-    setChatFolders(snapshot.folders);
-    setConversationFolders(snapshot.assignments);
-
+    if (foldersInitRef.current || folders.length === 0) return;
+    foldersInitRef.current = true;
     setExpandedFolderIds(() => {
       const next = new Set<string>();
-      snapshot.folders.forEach((folder) => {
+      folders.forEach((folder) => {
         if (!folder.archived && folder.parentId === null) {
           next.add(folder.id);
         }
       });
       return next;
     });
-    chatLayoutLoadedRef.current = true;
-  }, []);
-
-  useEffect(() => {
-    if (!chatLayoutLoadedRef.current) return;
-    saveChatLayoutSnapshot({
-      folders: chatFolders,
-      assignments: conversationFolders,
-    });
-  }, [chatFolders, conversationFolders]);
+  }, [folders]);
 
   useEffect(() => {
     if (!sidebarError) return;
@@ -348,6 +268,17 @@ export default function Sidebar({
       window.clearTimeout(timeoutId);
     };
   }, [sidebarError]);
+
+  // Derive conversation→folder map from conversation.folderId
+  const conversationFolders = useMemo(() => {
+    const map: Record<string, string> = Object.create(null);
+    conversations.forEach((conversation) => {
+      if (conversation.folderId) {
+        map[String(conversation.id)] = conversation.folderId;
+      }
+    });
+    return map;
+  }, [conversations]);
 
   useEffect(() => {
     if (viewMode === "chats") return;
@@ -371,79 +302,6 @@ export default function Sidebar({
     }
     return draggingEntityRef.current ?? draggingEntity;
   };
-
-  useEffect(() => {
-    const validFolderIds = new Set(
-      chatFolders.filter((folder) => !folder.archived).map((folder) => folder.id),
-    );
-    const activeConversationIds = new Set(
-      conversations.map((conversation) => String(conversation.id)),
-    );
-
-    let changed = false;
-    const nextAssignments: Record<string, string> = Object.create(null);
-    for (const conversation of conversations) {
-      const key = String(conversation.id);
-      const folderId = conversationFolders[key];
-      if (!folderId) continue;
-      if (!validFolderIds.has(folderId)) {
-        changed = true;
-        continue;
-      }
-      nextAssignments[key] = folderId;
-    }
-
-    for (const assignedConversationId of Object.keys(conversationFolders)) {
-      if (!activeConversationIds.has(assignedConversationId)) {
-        changed = true;
-        break;
-      }
-    }
-
-    if (changed || Object.keys(nextAssignments).length !== Object.keys(conversationFolders).length) {
-      setConversationFolders(nextAssignments);
-    }
-  }, [chatFolders, conversationFolders, conversations]);
-
-  useEffect(() => {
-    if (!pendingFolderForNewChat) return;
-    const folderExists = chatFolders.some(
-      (folder) => folder.id === pendingFolderForNewChat && !folder.archived,
-    );
-    if (!folderExists) {
-      setPendingFolderForNewChat(null);
-      return;
-    }
-
-    if (activeConversationId === null) return;
-    const key = String(activeConversationId);
-    const hasConversation = conversations.some(
-      (conversation) =>
-        sameConversation(conversation.id, activeConversationId) && !conversation.archived,
-    );
-    if (!hasConversation) return;
-
-    setConversationFolders((prev) => {
-      if (prev[key] === pendingFolderForNewChat) return prev;
-      return {
-        ...prev,
-        [key]: pendingFolderForNewChat,
-      };
-    });
-    setChatFolders((prev) =>
-      prev.map((folder) =>
-        folder.id === pendingFolderForNewChat
-          ? { ...folder, updatedAt: nowIso() }
-          : folder,
-      ),
-    );
-    setExpandedFolderIds((prev) => {
-      const next = new Set(prev);
-      next.add(pendingFolderForNewChat);
-      return next;
-    });
-    setPendingFolderForNewChat(null);
-  }, [activeConversationId, chatFolders, conversations, pendingFolderForNewChat]);
 
   const activeConversations = useMemo(
     () =>
@@ -511,7 +369,7 @@ export default function Sidebar({
   ) => {
     const menuWidth = 188;
     const menuHeight =
-      menu.kind === "folder" ? 214 : menu.kind === "conversation" ? 228 : 104;
+      menu.kind === "folder" ? 248 : menu.kind === "conversation" ? 228 : 104;
     openTreeContextMenu(event, menu, {
       mode: menu.kind === "root" ? "pointer" : "row",
       menuWidth,
@@ -572,17 +430,7 @@ export default function Sidebar({
 
     setSavingRename(true);
     try {
-      setChatFolders((prev) =>
-        prev.map((item) =>
-          item.id === folder.id
-            ? {
-              ...item,
-              name: nextName,
-              updatedAt: nowIso(),
-            }
-            : item,
-        ),
-      );
+      await onRenameChatFolder(folder.id, nextName);
       setEditingFolderId(null);
       setDraftTitle("");
     } catch (error) {
@@ -593,48 +441,28 @@ export default function Sidebar({
     }
   };
 
-  const createFolder = (parentId: string | null) => {
-    const existingNames = new Set(
-      chatFolders
-        .filter((folder) => folder.parentId === parentId && !folder.archived)
-        .map((folder) => folder.name),
-    );
-
-    const name = createFolderName(existingNames);
-    const createdAt = nowIso();
-    const nextFolder: ChatFolder = {
-      id: generateFolderId(),
-      name,
-      parentId,
-      pinned: false,
-      archived: false,
-      createdAt,
-      updatedAt: createdAt,
-    };
-
-    setChatFolders((prev) => sortFoldersByRecent([...prev, nextFolder]));
-    setExpandedFolderIds((prev) => {
-      const next = new Set(prev);
-      next.add(nextFolder.id);
-      if (parentId) next.add(parentId);
-      return next;
-    });
-    setEditingConversationId(null);
-    setEditingFolderId(nextFolder.id);
-    setDraftTitle(name);
+  const createFolder = async (parentId: string | null) => {
+    try {
+      const newId = await onCreateChatFolder(parentId);
+      setExpandedFolderIds((prev) => {
+        const next = new Set(prev);
+        next.add(newId);
+        if (parentId) next.add(parentId);
+        return next;
+      });
+      setEditingConversationId(null);
+      setEditingFolderId(newId);
+      setDraftTitle("New folder");
+    } catch (error) {
+      console.error("Failed to create folder", error);
+      setSidebarError(`Failed to create folder: ${String(error)}`);
+    }
   };
 
   const archiveConversationRow = async (conversation: Conversation) => {
     setContextMenu(null);
     try {
       await onArchiveConversation(conversation.id);
-      setConversationFolders((prev) => {
-        const key = String(conversation.id);
-        if (!(key in prev)) return prev;
-        const next = { ...prev };
-        delete next[key];
-        return next;
-      });
     } catch (error) {
       console.error("Failed to archive conversation", error);
       setSidebarError(`Failed to archive conversation: ${String(error)}`);
@@ -672,34 +500,7 @@ export default function Sidebar({
   };
 
   const setConversationFolder = (conversationId: Conversation["id"], folderId: string | null) => {
-    const key = String(conversationId);
-    setConversationFolders((prev) => {
-      if (!folderId) {
-        if (!(key in prev)) return prev;
-        const next = { ...prev };
-        delete next[key];
-        return next;
-      }
-      if (prev[key] === folderId) return prev;
-      return {
-        ...prev,
-        [key]: folderId,
-      };
-    });
-  };
-
-  const touchFolder = (folderId: string | null) => {
-    if (!folderId) return;
-    setChatFolders((prev) =>
-      prev.map((folder) =>
-        folder.id === folderId
-          ? {
-            ...folder,
-            updatedAt: nowIso(),
-          }
-          : folder,
-      ),
-    );
+    void onSetConversationFolder(String(conversationId), folderId);
   };
 
   const persistConversationOrder = (
@@ -754,8 +555,7 @@ export default function Sidebar({
     }
 
     if (entity.kind === "conversation") {
-      setConversationFolder(entity.id, targetFolderId);
-      touchFolder(targetFolderId);
+      void onSetConversationFolder(entity.id, targetFolderId);
       setExpandedFolderIds((prev) => {
         const next = new Set(prev);
         next.add(targetFolderId);
@@ -765,19 +565,7 @@ export default function Sidebar({
       return;
     }
 
-    setChatFolders((prev) =>
-      sortFoldersByRecent(
-        prev.map((folder) =>
-          folder.id === entity.id
-            ? {
-              ...folder,
-              parentId: targetFolderId,
-              updatedAt: nowIso(),
-            }
-            : folder,
-        ),
-      ),
-    );
+    void onMoveChatFolder(entity.id, targetFolderId);
     setExpandedFolderIds((prev) => {
       const next = new Set(prev);
       next.add(targetFolderId);
@@ -793,25 +581,13 @@ export default function Sidebar({
     }
 
     if (entity.kind === "conversation") {
-      setConversationFolder(entity.id, null);
+      void onSetConversationFolder(entity.id, null);
       persistConversationOrder(entity.id);
       resetDragState();
       return;
     }
 
-    setChatFolders((prev) =>
-      sortFoldersByRecent(
-        prev.map((folder) =>
-          folder.id === entity.id
-            ? {
-              ...folder,
-              parentId: null,
-              updatedAt: nowIso(),
-            }
-            : folder,
-        ),
-      ),
-    );
+    void onMoveChatFolder(entity.id, null);
     resetDragState();
   };
 
@@ -829,61 +605,30 @@ export default function Sidebar({
 
   const toggleFolderPin = (folder: ChatFolder) => {
     setContextMenu(null);
-    setChatFolders((prev) =>
-      sortFoldersByRecent(
-        prev.map((candidate) =>
-          candidate.id === folder.id
-            ? {
-              ...candidate,
-              pinned: !candidate.pinned,
-              updatedAt: nowIso(),
-            }
-            : candidate,
-        ),
-      ),
-    );
+    if (folder.pinned) {
+      void onUnpinChatFolder(folder.id);
+    } else {
+      void onPinChatFolder(folder.id);
+    }
   };
 
   const archiveFolder = (folder: ChatFolder) => {
     setContextMenu(null);
     const descendants = getFolderDescendants(chatFolders, folder.id);
-
-    setChatFolders((prev) =>
-      prev.map((candidate) =>
-        descendants.has(candidate.id)
-          ? {
-            ...candidate,
-            archived: true,
-            pinned: false,
-            updatedAt: nowIso(),
-          }
-          : candidate,
-      ),
-    );
-
     setExpandedFolderIds((prev) => {
       const next = new Set(prev);
       descendants.forEach((id) => next.delete(id));
       return next;
     });
-
-    setConversationFolders((prev) => {
-      const next: Record<string, string> = Object.create(null);
-      for (const [conversationId, folderId] of Object.entries(prev)) {
-        if (descendants.has(folderId)) continue;
-        next[conversationId] = folderId;
-      }
-      return next;
-    });
+    void onArchiveChatFolder(folder.id);
   };
 
   const startNewChat = (folderId: string | null = null) => {
     setContextMenu(null);
     setEditingConversationId(null);
     setEditingFolderId(null);
-    setPendingFolderForNewChat(folderId);
     setViewMode("chats");
-    onNewChat();
+    onNewChat(folderId);
   };
 
   type SidebarHandlers = ConversationRowHandlers & ChatFolderRowHandlers;
@@ -1005,6 +750,7 @@ export default function Sidebar({
 
   const renderConversationRow = (conversation: Conversation, depth: number) => {
     const conversationId = String(conversation.id);
+    const parentFolderId = conversationFolders[conversationId] ?? null;
     return (
       <ConversationRow
         key={`conversation:${conversationId}`}
@@ -1014,7 +760,7 @@ export default function Sidebar({
         isActive={activeConversationId !== null && sameConversation(conversation.id, activeConversationId)}
         isEditing={editingConversationId !== null && sameConversation(editingConversationId, conversation.id)}
         isPinned={Boolean(conversation.pinned)}
-        parentFolderId={conversationFolders[conversationId] ?? null}
+        parentFolderId={parentFolderId}
         draftTitle={draftTitle}
         savingRename={savingRename}
         handlers={sidebarHandlersRef}
@@ -1032,6 +778,7 @@ export default function Sidebar({
         key={`folder:${folder.id}`}
         folderId={folder.id}
         name={folder.name}
+        icon={folder.icon}
         depth={depth}
         isExpanded={isExpanded}
         isDrop={dropTarget?.kind === "folder" && dropTarget.folderId === folder.id}
@@ -1151,7 +898,7 @@ export default function Sidebar({
                       type="button"
                       onClick={() => {
                         setContextMenu(null);
-                        setConversationFolder(selectedMenuConversation.id, null);
+                        void onSetConversationFolder(String(selectedMenuConversation.id), null);
                         persistConversationOrder(String(selectedMenuConversation.id));
                       }}
                       className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
@@ -1214,6 +961,17 @@ export default function Sidebar({
               </button>
               <button
                 type="button"
+                onClick={() => {
+                  setContextMenu(null);
+                  onOpenFolderSettings(selectedMenuFolder.id);
+                }}
+                className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
+              >
+                <span>Settings</span>
+                <span>⚙</span>
+              </button>
+              <button
+                type="button"
                 onClick={() => archiveFolder(selectedMenuFolder)}
                 className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs text-error transition-colors hover:bg-error/10"
               >
@@ -1253,8 +1011,8 @@ export default function Sidebar({
 
   return (
     <>
-      <aside
-        className={`h-full shrink-0 bg-transparent transition-[width] duration-[180ms] ease-out ${sidebarCollapsed ? "w-14" : "w-[248px]"
+        <aside
+        className={`relative h-full shrink-0 bg-transparent transition-[width] duration-[180ms] ease-out ${sidebarCollapsed ? "w-[74px]" : "w-[248px]"
           }`}
       >
         <div className="flex h-full flex-col">
@@ -1268,62 +1026,55 @@ export default function Sidebar({
 
           {/* Tab switcher — floating */}
           <div className="relative z-[1] px-3 pt-3 pb-3">
-            {!sidebarCollapsed && (
-              <div className="relative grid grid-cols-2 rounded-[20px] border border-overlay-6 bg-overlay-3 p-1.5">
+            {sidebarCollapsed ? (
+              <div className="flex flex-col items-center">
+                <button
+                  type="button"
+                  onClick={() => setViewMode(viewMode === "chats" ? "files" : "chats")}
+                  className="relative flex h-10 w-10 items-center justify-center rounded-2xl border border-overlay-6 bg-overlay-3 text-text transition-all duration-200 hover:bg-overlay-6"
+                  title={viewMode === "chats" ? "Switch to Knowledge" : "Switch to Chats"}
+                >
+                  <div className="relative h-4 w-4">
+                    <MessageSquare
+                      className={`absolute inset-0 h-4 w-4 transition-all duration-200 ${viewMode === "chats" ? "opacity-100 scale-100" : "opacity-0 scale-75"}`}
+                      strokeWidth={1.8}
+                    />
+                    <BookOpen
+                      className={`absolute inset-0 h-4 w-4 transition-all duration-200 ${viewMode === "files" ? "opacity-100 scale-100" : "opacity-0 scale-75"}`}
+                      strokeWidth={1.8}
+                    />
+                  </div>
+                </button>
+              </div>
+            ) : (
+              <div className="relative grid grid-cols-2 rounded-2xl border border-overlay-6 bg-overlay-3">
                 <div
-                  className="absolute left-1.5 top-1.5 bottom-1.5 w-[calc(50%-6px)] rounded-[14px] bg-overlay-8 transition-transform duration-200 ease-out"
+                  className="absolute inset-0 w-1/2 rounded-2xl bg-overlay-8 transition-transform duration-200 ease-out"
                   style={{ transform: viewMode === "files" ? "translateX(100%)" : "translateX(0)" }}
                 />
                 <button
                   type="button"
                   onClick={() => setViewMode("chats")}
-                  className={`relative z-[1] rounded-[14px] px-2.5 py-2 text-xs font-medium transition-colors duration-200 ${viewMode === "chats"
-                    ? "text-text"
-                    : "text-text-muted hover:text-text-secondary"
-                    }`}
-                >
-                  Chats
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setViewMode("files")}
-                  className={`relative z-[1] rounded-[14px] px-2.5 py-2 text-xs font-medium transition-colors duration-200 ${viewMode === "files"
-                    ? "text-text"
-                    : "text-text-muted hover:text-text-secondary"
-                    }`}
-                >
-                  Knowledge
-                </button>
-              </div>
-            )}
-
-            {sidebarCollapsed && (
-              <div className="relative flex flex-col gap-0.5 rounded-[20px] border border-overlay-6 bg-overlay-3 p-1.5">
-                <div
-                  className="absolute left-1.5 right-1.5 top-1.5 h-[calc(50%-4px)] rounded-[14px] bg-overlay-8 transition-transform duration-200 ease-out"
-                  style={{ transform: viewMode === "files" ? "translateY(calc(100% + 6px))" : "translateY(0)" }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setViewMode("chats")}
-                  className={`relative z-[1] rounded-[14px] px-2.5 py-2 text-[11px] font-medium transition-colors duration-200 ${viewMode === "chats"
+                  className={`relative z-[1] flex items-center justify-center gap-1.5 rounded-2xl px-2 py-2 text-xs font-medium transition-colors duration-200 ${viewMode === "chats"
                     ? "text-text"
                     : "text-text-muted hover:text-text-secondary"
                     }`}
                   title="Chats"
                 >
-                  C
+                  <MessageSquare className="h-3.5 w-3.5" strokeWidth={1.8} />
+                  <span>Chats</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setViewMode("files")}
-                  className={`relative z-[1] rounded-[14px] px-2.5 py-2 text-[11px] font-medium transition-colors duration-200 ${viewMode === "files"
+                  className={`relative z-[1] flex items-center justify-center gap-1.5 rounded-2xl px-2 py-2 text-xs font-medium transition-colors duration-200 ${viewMode === "files"
                     ? "text-text"
                     : "text-text-muted hover:text-text-secondary"
                     }`}
                   title="Knowledge"
                 >
-                  K
+                  <BookOpen className="h-3.5 w-3.5" strokeWidth={1.8} />
+                  <span>Knowledge</span>
                 </button>
               </div>
             )}
@@ -1515,16 +1266,13 @@ export default function Sidebar({
             )}
             <button
               onClick={toggleSidebarCollapsed}
-              className="flex w-full items-center justify-center gap-2 rounded-xl px-2 py-1.5 text-sm text-text-muted transition-all duration-[120ms] hover:bg-bg-tertiary/60 hover:text-text-secondary"
+              className="flex w-full items-center justify-center rounded-xl px-2 py-1.5 text-sm text-text-muted transition-all duration-[120ms] hover:bg-bg-tertiary/60 hover:text-text-secondary"
               title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
             >
               {sidebarCollapsed ? (
                 <ChevronsRight className="h-3.5 w-3.5" strokeWidth={1.8} />
               ) : (
-                <>
-                  <ChevronsLeft className="h-3.5 w-3.5" strokeWidth={1.8} />
-                  <span>Collapse</span>
-                </>
+                <ChevronsLeft className="h-3.5 w-3.5" strokeWidth={1.8} />
               )}
             </button>
           </div>

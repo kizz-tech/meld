@@ -5,8 +5,11 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::adapters::llm::TokenUsage;
+use crate::adapters::providers::split_model_id;
 use crate::core::agent::state::AgentState;
 use crate::core::ports::store::{RunFinishRecord, RunStartRecord, StorePort};
+
+mod math;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ChunkResult {
@@ -31,6 +34,22 @@ pub struct ConversationSummary {
     pub archived: bool,
     pub pinned: bool,
     pub sort_order: Option<i64>,
+    pub folder_id: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct FolderSummary {
+    pub id: String,
+    pub name: String,
+    pub icon: Option<String>,
+    pub custom_instruction: Option<String>,
+    pub default_model_id: Option<String>,
+    pub parent_id: Option<String>,
+    pub pinned: bool,
+    pub archived: bool,
+    pub sort_order: Option<i64>,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -71,6 +90,16 @@ pub struct RunEvent {
     pub event_type: String,
     pub payload: serde_json::Value,
     pub ts: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct PreparedChunkEmbedding {
+    pub chunk_index: usize,
+    pub heading_path: Option<String>,
+    pub content: String,
+    pub char_start: usize,
+    pub char_end: usize,
+    pub embedding: Vec<f32>,
 }
 
 pub struct VectorDb {
@@ -154,11 +183,14 @@ impl StorePort for SqliteRunStore {
 impl VectorDb {
     pub fn open(path: &Path) -> Result<Self, Box<dyn std::error::Error>> {
         let conn = Connection::open(path)?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
 
         // Load sqlite-vec extension
         // For now, we use standard tables — sqlite-vec will be loaded when available
         conn.execute_batch(
             "
+            PRAGMA journal_mode = WAL;
+            PRAGMA synchronous = NORMAL;
             PRAGMA foreign_keys = ON;
 
             CREATE TABLE IF NOT EXISTS chunks (
@@ -232,11 +264,28 @@ impl VectorDb {
                 FOREIGN KEY (run_id) REFERENCES runs(run_id)
             );
 
+            CREATE TABLE IF NOT EXISTS folders (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL DEFAULT 'New folder',
+                icon TEXT,
+                custom_instruction TEXT,
+                default_model_id TEXT,
+                parent_id INTEGER,
+                pinned INTEGER NOT NULL DEFAULT 0,
+                archived INTEGER NOT NULL DEFAULT 0,
+                sort_order INTEGER,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (parent_id) REFERENCES folders(id) ON DELETE SET NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_chunks_file ON chunks(file_path);
             CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id);
             CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
             CREATE INDEX IF NOT EXISTS idx_run_events_run ON run_events(run_id);
             CREATE INDEX IF NOT EXISTS idx_run_events_ts ON run_events(ts);
+            CREATE INDEX IF NOT EXISTS idx_folders_parent ON folders(parent_id);
+            CREATE INDEX IF NOT EXISTS idx_folders_archived ON folders(archived);
             ",
         )?;
 
@@ -285,6 +334,13 @@ impl VectorDb {
         )?;
         ignore_duplicate_column_error(
             conn.execute("ALTER TABLE runs ADD COLUMN policy_fingerprint TEXT", []),
+        )?;
+        ignore_duplicate_column_error(conn.execute(
+            "ALTER TABLE conversations ADD COLUMN folder_id INTEGER REFERENCES folders(id) ON DELETE SET NULL",
+            [],
+        ))?;
+        ignore_duplicate_column_error(
+            conn.execute("ALTER TABLE folders ADD COLUMN default_model_id TEXT", []),
         )?;
 
         sync_chunks_fts(&conn)?;
@@ -379,6 +435,13 @@ impl VectorDb {
                 [],
             )?;
         }
+        let has_folder_id = table_has_column(&conn, "conversations", "folder_id")?;
+        if has_folder_id {
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_conversations_folder ON conversations(folder_id)",
+                [],
+            )?;
+        }
 
         Ok(Self { conn })
     }
@@ -410,6 +473,75 @@ impl VectorDb {
         )?;
         self.conn
             .execute("DELETE FROM files WHERE path = ?1", params![file_path])?;
+        Ok(())
+    }
+
+    pub fn replace_file_chunks_atomically(
+        &mut self,
+        file_path: &str,
+        hash: &str,
+        chunks: &[PreparedChunkEmbedding],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let has_fts = table_exists(&self.conn, "chunks_fts")?;
+        let tx = self.conn.transaction()?;
+
+        if has_fts {
+            tx.execute(
+                "DELETE FROM chunks_fts WHERE rowid IN (SELECT id FROM chunks WHERE file_path = ?1)",
+                params![file_path],
+            )?;
+        }
+        tx.execute(
+            "DELETE FROM chunks WHERE file_path = ?1",
+            params![file_path],
+        )?;
+        tx.execute("DELETE FROM files WHERE path = ?1", params![file_path])?;
+
+        for chunk in chunks {
+            let embedding_bytes: Vec<u8> = chunk
+                .embedding
+                .iter()
+                .flat_map(|value| value.to_le_bytes())
+                .collect();
+
+            tx.execute(
+                "INSERT INTO chunks (file_path, chunk_index, heading_path, content, char_start, char_end, file_hash, embedding)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    file_path,
+                    chunk.chunk_index as i64,
+                    chunk.heading_path.as_deref(),
+                    chunk.content.as_str(),
+                    chunk.char_start as i64,
+                    chunk.char_end as i64,
+                    hash,
+                    embedding_bytes,
+                ],
+            )?;
+
+            if has_fts {
+                let chunk_id = tx.last_insert_rowid();
+                tx.execute(
+                    "INSERT INTO chunks_fts(rowid, content, file_path, chunk_index, heading_path)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![
+                        chunk_id,
+                        chunk.content.as_str(),
+                        file_path,
+                        chunk.chunk_index as i64,
+                        chunk.heading_path.as_deref().unwrap_or(""),
+                    ],
+                )?;
+            }
+        }
+
+        tx.execute(
+            "INSERT OR REPLACE INTO files (path, hash, chunk_count, indexed_at)
+             VALUES (?1, ?2, ?3, datetime('now'))",
+            params![file_path, hash, chunks.len() as i64],
+        )?;
+
+        tx.commit()?;
         Ok(())
     }
 
@@ -536,7 +668,7 @@ impl VectorDb {
                 .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
                 .collect();
 
-            let similarity = cosine_similarity(query_embedding, &stored_embedding);
+            let similarity = math::cosine_similarity(query_embedding, &stored_embedding);
 
             results.push((
                 ChunkResult {
@@ -739,11 +871,12 @@ impl VectorDb {
                 COUNT(m.id) AS message_count,
                 CAST(COALESCE(c.archived, 0) AS INTEGER) AS archived,
                 CAST(COALESCE(c.pinned, 0) AS INTEGER) AS pinned,
-                c.sort_order
+                c.sort_order,
+                c.folder_id
              FROM conversations c
              LEFT JOIN messages m ON m.conversation_id = c.id
              WHERE CAST(COALESCE(c.archived, 0) AS INTEGER) = 0
-             GROUP BY c.id, c.title, c.updated_at, c.created_at, c.archived, c.pinned, c.sort_order
+             GROUP BY c.id, c.title, c.updated_at, c.created_at, c.archived, c.pinned, c.sort_order, c.folder_id
              ORDER BY
                 CAST(COALESCE(c.pinned, 0) AS INTEGER) DESC,
                 CASE WHEN c.sort_order IS NULL THEN 1 ELSE 0 END ASC,
@@ -762,6 +895,7 @@ impl VectorDb {
                 archived: row.get::<_, i64>(5)? == 1,
                 pinned: row.get::<_, i64>(6)? == 1,
                 sort_order: row.get(7)?,
+                folder_id: row.get::<_, Option<i64>>(8)?.map(|id| id.to_string()),
             })
         })?;
 
@@ -784,11 +918,12 @@ impl VectorDb {
                 COUNT(m.id) AS message_count,
                 CAST(COALESCE(c.archived, 0) AS INTEGER) AS archived,
                 CAST(COALESCE(c.pinned, 0) AS INTEGER) AS pinned,
-                c.sort_order
+                c.sort_order,
+                c.folder_id
              FROM conversations c
              LEFT JOIN messages m ON m.conversation_id = c.id
              WHERE CAST(COALESCE(c.archived, 0) AS INTEGER) = 1
-             GROUP BY c.id, c.title, c.updated_at, c.created_at, c.archived, c.pinned, c.sort_order
+             GROUP BY c.id, c.title, c.updated_at, c.created_at, c.archived, c.pinned, c.sort_order, c.folder_id
              ORDER BY datetime(COALESCE(c.updated_at, c.created_at, datetime('now'))) DESC, c.id DESC",
         )?;
 
@@ -802,6 +937,7 @@ impl VectorDb {
                 archived: row.get::<_, i64>(5)? == 1,
                 pinned: row.get::<_, i64>(6)? == 1,
                 sort_order: row.get(7)?,
+                folder_id: row.get::<_, Option<i64>>(8)?.map(|id| id.to_string()),
             })
         })?;
 
@@ -889,6 +1025,25 @@ impl VectorDb {
 
         tx.commit()?;
         Ok(())
+    }
+
+    pub fn get_message_conversation_id(
+        &self,
+        message_id: i64,
+    ) -> Result<i64, Box<dyn std::error::Error>> {
+        let conversation_id = self.conn.query_row(
+            "SELECT conversation_id FROM messages WHERE id = ?1",
+            params![message_id],
+            |row| row.get::<_, i64>(0),
+        );
+
+        match conversation_id {
+            Ok(value) => Ok(value),
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                Err(format!("Message {} not found", message_id).into())
+            }
+            Err(error) => Err(error.into()),
+        }
     }
 
     pub fn get_last_assistant_message_id(
@@ -1193,6 +1348,428 @@ impl VectorDb {
             Err(e) => Err(e.into()),
         }
     }
+
+    // ── Folder methods ────────────────────────────────────
+
+    pub fn create_folder(
+        &mut self,
+        name: &str,
+        parent_id: Option<i64>,
+    ) -> Result<i64, Box<dyn std::error::Error>> {
+        let name = if name.trim().is_empty() {
+            "New folder"
+        } else {
+            name.trim()
+        };
+        self.conn.execute(
+            "INSERT INTO folders (name, parent_id, created_at, updated_at)
+             VALUES (?1, ?2, datetime('now'), datetime('now'))",
+            params![name, parent_id],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn get_folder(&self, folder_id: i64) -> Result<FolderSummary, Box<dyn std::error::Error>> {
+        let folder = self.conn.query_row(
+            "SELECT id, name, icon, custom_instruction, default_model_id, parent_id, pinned, archived, sort_order, created_at, updated_at
+             FROM folders WHERE id = ?1",
+            params![folder_id],
+            |row| {
+                Ok(FolderSummary {
+                    id: row.get::<_, i64>(0)?.to_string(),
+                    name: row.get(1)?,
+                    icon: row.get(2)?,
+                    custom_instruction: row.get(3)?,
+                    default_model_id: row.get(4)?,
+                    parent_id: row.get::<_, Option<i64>>(5)?.map(|id| id.to_string()),
+                    pinned: row.get::<_, i64>(6)? == 1,
+                    archived: row.get::<_, i64>(7)? == 1,
+                    sort_order: row.get(8)?,
+                    created_at: row.get(9)?,
+                    updated_at: row.get(10)?,
+                })
+            },
+        )?;
+        Ok(folder)
+    }
+
+    pub fn list_folders(&self) -> Result<Vec<FolderSummary>, Box<dyn std::error::Error>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, icon, custom_instruction, default_model_id, parent_id, pinned, archived, sort_order, created_at, updated_at
+             FROM folders
+             WHERE archived = 0
+             ORDER BY pinned DESC, sort_order ASC, datetime(updated_at) DESC, id DESC",
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok(FolderSummary {
+                id: row.get::<_, i64>(0)?.to_string(),
+                name: row.get(1)?,
+                icon: row.get(2)?,
+                custom_instruction: row.get(3)?,
+                default_model_id: row.get(4)?,
+                parent_id: row.get::<_, Option<i64>>(5)?.map(|id| id.to_string()),
+                pinned: row.get::<_, i64>(6)? == 1,
+                archived: row.get::<_, i64>(7)? == 1,
+                sort_order: row.get(8)?,
+                created_at: row.get(9)?,
+                updated_at: row.get(10)?,
+            })
+        })?;
+
+        let mut folders = Vec::new();
+        for row in rows {
+            folders.push(row?);
+        }
+        Ok(folders)
+    }
+
+    pub fn rename_folder(
+        &mut self,
+        folder_id: i64,
+        name: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("Folder name cannot be empty".into());
+        }
+        let updated = self.conn.execute(
+            "UPDATE folders SET name = ?1, updated_at = datetime('now') WHERE id = ?2",
+            params![name, folder_id],
+        )?;
+        if updated == 0 {
+            return Err(format!("Folder {} not found", folder_id).into());
+        }
+        Ok(())
+    }
+
+    pub fn update_folder(
+        &mut self,
+        folder_id: i64,
+        icon: Option<&str>,
+        custom_instruction: Option<&str>,
+        default_model_id: Option<&str>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let normalized_default_model_id = default_model_id.and_then(|value| {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+
+            match split_model_id(trimmed) {
+                Ok(_) => Some(trimmed.to_string()),
+                Err(error) => {
+                    log::warn!(
+                        "Dropping invalid folder default_model_id '{}' for folder {}: {}",
+                        trimmed,
+                        folder_id,
+                        error
+                    );
+                    None
+                }
+            }
+        });
+        let updated = self.conn.execute(
+            "UPDATE folders SET icon = ?1, custom_instruction = ?2, default_model_id = ?3, updated_at = datetime('now') WHERE id = ?4",
+            params![icon, custom_instruction, normalized_default_model_id.as_deref(), folder_id],
+        )?;
+        if updated == 0 {
+            return Err(format!("Folder {} not found", folder_id).into());
+        }
+        Ok(())
+    }
+
+    pub fn set_folder_archived(
+        &mut self,
+        folder_id: i64,
+        archived: bool,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let tx = self.conn.transaction()?;
+
+        // Collect all descendant folder IDs (including self)
+        let mut descendants = vec![folder_id];
+        let mut stack = vec![folder_id];
+        while let Some(current) = stack.pop() {
+            let mut stmt = tx.prepare("SELECT id FROM folders WHERE parent_id = ?1")?;
+            let children: Vec<i64> = stmt
+                .query_map(params![current], |row| row.get::<_, i64>(0))?
+                .filter_map(|r| r.ok())
+                .collect();
+            for child in children {
+                descendants.push(child);
+                stack.push(child);
+            }
+        }
+
+        for id in &descendants {
+            if archived {
+                tx.execute(
+                    "UPDATE folders SET archived = 1, pinned = 0, updated_at = datetime('now') WHERE id = ?1",
+                    params![id],
+                )?;
+            } else {
+                tx.execute(
+                    "UPDATE folders SET archived = 0, updated_at = datetime('now') WHERE id = ?1",
+                    params![id],
+                )?;
+            }
+        }
+
+        // Unassign conversations from archived folders
+        if archived {
+            for id in &descendants {
+                tx.execute(
+                    "UPDATE conversations SET folder_id = NULL WHERE folder_id = ?1",
+                    params![id],
+                )?;
+            }
+        }
+
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn set_folder_pinned(
+        &mut self,
+        folder_id: i64,
+        pinned: bool,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let updated = self.conn.execute(
+            "UPDATE folders SET pinned = ?1, updated_at = datetime('now') WHERE id = ?2",
+            params![if pinned { 1 } else { 0 }, folder_id],
+        )?;
+        if updated == 0 {
+            return Err(format!("Folder {} not found", folder_id).into());
+        }
+        Ok(())
+    }
+
+    pub fn move_folder(
+        &mut self,
+        folder_id: i64,
+        new_parent_id: Option<i64>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // Cycle detection: new_parent_id must not be a descendant of folder_id
+        if let Some(target_parent) = new_parent_id {
+            if target_parent == folder_id {
+                return Err("Cannot move folder into itself".into());
+            }
+            let mut current = Some(target_parent);
+            while let Some(pid) = current {
+                let parent: Option<i64> = self
+                    .conn
+                    .query_row(
+                        "SELECT parent_id FROM folders WHERE id = ?1",
+                        params![pid],
+                        |row| row.get(0),
+                    )
+                    .ok();
+                match parent {
+                    Some(p) if p == folder_id => {
+                        return Err("Cannot move folder into its own descendant".into());
+                    }
+                    Some(p) => current = Some(p),
+                    None => break,
+                }
+            }
+        }
+
+        let updated = self.conn.execute(
+            "UPDATE folders SET parent_id = ?1, updated_at = datetime('now') WHERE id = ?2",
+            params![new_parent_id, folder_id],
+        )?;
+        if updated == 0 {
+            return Err(format!("Folder {} not found", folder_id).into());
+        }
+        Ok(())
+    }
+
+    pub fn set_conversation_folder(
+        &mut self,
+        conversation_id: i64,
+        folder_id: Option<i64>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let updated = self.conn.execute(
+            "UPDATE conversations SET folder_id = ?1, updated_at = datetime('now') WHERE id = ?2",
+            params![folder_id, conversation_id],
+        )?;
+        if updated == 0 {
+            return Err(format!("Conversation {} not found", conversation_id).into());
+        }
+        Ok(())
+    }
+
+    pub fn get_folder_instruction_chain(
+        &self,
+        folder_id: i64,
+    ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+        // Traverse from folder_id to root, collecting instructions, then reverse
+        let mut chain = Vec::new();
+        let mut current = Some(folder_id);
+        let mut visited = std::collections::HashSet::new();
+
+        while let Some(fid) = current {
+            if !visited.insert(fid) {
+                break; // cycle safety
+            }
+            let row = self.conn.query_row(
+                "SELECT custom_instruction, parent_id FROM folders WHERE id = ?1",
+                params![fid],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<i64>>(1)?,
+                    ))
+                },
+            );
+            match row {
+                Ok((instruction, parent_id)) => {
+                    if let Some(inst) = instruction {
+                        let trimmed = inst.trim().to_string();
+                        if !trimmed.is_empty() {
+                            chain.push(trimmed);
+                        }
+                    }
+                    current = parent_id;
+                }
+                Err(_) => break,
+            }
+        }
+
+        chain.reverse(); // root → leaf order
+        Ok(chain)
+    }
+
+    pub fn get_conversation_folder_id(
+        &self,
+        conversation_id: i64,
+    ) -> Result<Option<i64>, Box<dyn std::error::Error>> {
+        let folder_id = self.conn.query_row(
+            "SELECT folder_id FROM conversations WHERE id = ?1",
+            params![conversation_id],
+            |row| row.get::<_, Option<i64>>(0),
+        )?;
+        Ok(folder_id)
+    }
+
+    pub fn resolve_conversation_chat_model_id(
+        &self,
+        conversation_id: i64,
+    ) -> Result<Option<String>, Box<dyn std::error::Error>> {
+        let mut current = self.get_conversation_folder_id(conversation_id)?;
+        let mut visited = std::collections::HashSet::new();
+
+        while let Some(folder_id) = current {
+            if !visited.insert(folder_id) {
+                break;
+            }
+
+            let row = self.conn.query_row(
+                "SELECT default_model_id, parent_id FROM folders WHERE id = ?1",
+                params![folder_id],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<i64>>(1)?,
+                    ))
+                },
+            );
+
+            match row {
+                Ok((default_model_id, parent_id)) => {
+                    if let Some(model_id) = default_model_id {
+                        let trimmed = model_id.trim();
+                        if !trimmed.is_empty() {
+                            match split_model_id(trimmed) {
+                                Ok(_) => return Ok(Some(trimmed.to_string())),
+                                Err(error) => {
+                                    log::warn!(
+                                        "Ignoring invalid default_model_id '{}' for folder {} while resolving conversation {}: {}",
+                                        trimmed,
+                                        folder_id,
+                                        conversation_id,
+                                        error
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    current = parent_id;
+                }
+                Err(rusqlite::Error::QueryReturnedNoRows) => break,
+                Err(error) => return Err(Box::new(error)),
+            }
+        }
+
+        Ok(None)
+    }
+
+    pub fn import_folders_from_local(
+        &mut self,
+        json: &str,
+    ) -> Result<std::collections::HashMap<String, i64>, Box<dyn std::error::Error>> {
+        #[derive(serde::Deserialize)]
+        struct LocalFolder {
+            id: String,
+            name: String,
+            #[serde(rename = "parentId")]
+            parent_id: Option<String>,
+            pinned: Option<bool>,
+            #[serde(default)]
+            archived: Option<bool>,
+        }
+
+        #[derive(serde::Deserialize)]
+        struct LocalLayout {
+            folders: Vec<LocalFolder>,
+            assignments: std::collections::HashMap<String, String>,
+        }
+
+        let layout: LocalLayout = serde_json::from_str(json)?;
+        let mut id_map: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+
+        // Topological insert: process folders with no parent first, then children
+        let mut remaining: Vec<&LocalFolder> = layout.folders.iter().collect();
+        let mut progress = true;
+        while !remaining.is_empty() && progress {
+            progress = false;
+            let mut next_remaining = Vec::new();
+            for folder in remaining {
+                if folder.archived.unwrap_or(false) {
+                    progress = true;
+                    continue;
+                }
+                let resolved_parent = match &folder.parent_id {
+                    None => Some(None),
+                    Some(pid) => id_map.get(pid).map(|&db_id| Some(db_id)),
+                };
+                if let Some(parent_id) = resolved_parent {
+                    let db_id = self.create_folder(&folder.name, parent_id)?;
+                    if folder.pinned.unwrap_or(false) {
+                        let _ = self.set_folder_pinned(db_id, true);
+                    }
+                    id_map.insert(folder.id.clone(), db_id);
+                    progress = true;
+                } else {
+                    next_remaining.push(folder);
+                }
+            }
+            remaining = next_remaining;
+        }
+
+        // Apply conversation assignments
+        for (conversation_id_str, local_folder_id) in &layout.assignments {
+            if let Some(&db_folder_id) = id_map.get(local_folder_id) {
+                if let Ok(conv_id) = conversation_id_str.parse::<i64>() {
+                    let _ = self.set_conversation_folder(conv_id, Some(db_folder_id));
+                }
+            }
+        }
+
+        Ok(id_map)
+    }
+
+    // ── Run methods ────────────────────────────────────
 
     #[allow(clippy::too_many_arguments)]
     pub fn create_run(
@@ -1504,433 +2081,5 @@ fn table_exists(conn: &Connection, table: &str) -> rusqlite::Result<bool> {
     Ok(count > 0)
 }
 
-fn cosine_similarity(a: &[f32], b: &[f32]) -> f64 {
-    if a.len() != b.len() || a.is_empty() {
-        return 0.0;
-    }
-
-    let dot: f64 = a
-        .iter()
-        .zip(b.iter())
-        .map(|(x, y)| (*x as f64) * (*y as f64))
-        .sum();
-    let norm_a: f64 = a
-        .iter()
-        .map(|x| (*x as f64) * (*x as f64))
-        .sum::<f64>()
-        .sqrt();
-    let norm_b: f64 = b
-        .iter()
-        .map(|x| (*x as f64) * (*x as f64))
-        .sum::<f64>()
-        .sqrt();
-
-    if norm_a == 0.0 || norm_b == 0.0 {
-        return 0.0;
-    }
-
-    dot / (norm_a * norm_b)
-}
-
 #[cfg(test)]
-mod tests {
-    use super::VectorDb;
-    use rusqlite::{params, Connection};
-    use std::path::PathBuf;
-
-    fn temp_db_path() -> PathBuf {
-        std::env::temp_dir().join(format!(
-            "meld-vectordb-migration-{}.db",
-            uuid::Uuid::new_v4()
-        ))
-    }
-
-    #[test]
-    fn open_migrates_legacy_conversations_schema() {
-        let db_path = temp_db_path();
-
-        // Legacy schema without title/updated_at and without messages.sources/tool_calls/timeline.
-        let conn = Connection::open(&db_path).expect("open temp sqlite");
-        conn.execute_batch(
-            "
-            CREATE TABLE conversations (
-                id INTEGER PRIMARY KEY,
-                created_at TEXT NOT NULL DEFAULT (datetime('now'))
-            );
-            CREATE TABLE messages (
-                id INTEGER PRIMARY KEY,
-                conversation_id INTEGER NOT NULL,
-                role TEXT NOT NULL,
-                content TEXT NOT NULL,
-                created_at TEXT NOT NULL DEFAULT (datetime('now'))
-            );
-            ",
-        )
-        .expect("create legacy schema");
-        drop(conn);
-
-        let db = VectorDb::open(&db_path).expect("migrate legacy schema");
-
-        let has_title: i64 = db
-            .conn
-            .query_row(
-                "SELECT COUNT(*) FROM pragma_table_info('conversations') WHERE name = 'title'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("check title column");
-        let has_updated_at: i64 = db
-            .conn
-            .query_row(
-                "SELECT COUNT(*) FROM pragma_table_info('conversations') WHERE name = 'updated_at'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("check updated_at column");
-        let has_timeline: i64 = db
-            .conn
-            .query_row(
-                "SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name = 'timeline'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("check timeline column");
-
-        assert_eq!(has_title, 1);
-        assert_eq!(has_updated_at, 1);
-        assert_eq!(has_timeline, 1);
-
-        let _ = std::fs::remove_file(db_path);
-    }
-
-    #[test]
-    fn open_migrates_legacy_chunks_without_heading_path() {
-        let db_path = temp_db_path();
-
-        let conn = Connection::open(&db_path).expect("open temp sqlite");
-        conn.execute_batch(
-            "
-            CREATE TABLE chunks (
-                id INTEGER PRIMARY KEY,
-                file_path TEXT NOT NULL,
-                chunk_index INTEGER NOT NULL,
-                content TEXT NOT NULL,
-                char_start INTEGER NOT NULL,
-                char_end INTEGER NOT NULL,
-                file_hash TEXT NOT NULL,
-                embedding BLOB,
-                created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                UNIQUE(file_path, chunk_index)
-            );
-            ",
-        )
-        .expect("create legacy chunks");
-        drop(conn);
-
-        let db = VectorDb::open(&db_path).expect("open should migrate legacy chunks");
-
-        let has_heading_path: i64 = db
-            .conn
-            .query_row(
-                "SELECT COUNT(*) FROM pragma_table_info('chunks') WHERE name = 'heading_path'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("check heading_path column");
-        assert_eq!(has_heading_path, 1);
-
-        let _ = std::fs::remove_file(db_path);
-    }
-
-    #[test]
-    fn get_last_user_message_respects_assistant_anchor() {
-        let db_path = temp_db_path();
-        let mut db = VectorDb::open(&db_path).expect("open db");
-
-        let conversation_id = db
-            .create_conversation("regenerate test")
-            .expect("create conversation");
-        let _user_1 = db
-            .save_message(
-                conversation_id,
-                "user",
-                "first user prompt",
-                None,
-                None,
-                None,
-            )
-            .expect("save first user");
-        let assistant_1 = db
-            .save_message(
-                conversation_id,
-                "assistant",
-                "first answer",
-                None,
-                None,
-                None,
-            )
-            .expect("save first assistant");
-        let _user_2 = db
-            .save_message(
-                conversation_id,
-                "user",
-                "second user prompt",
-                None,
-                None,
-                None,
-            )
-            .expect("save second user");
-        let assistant_2 = db
-            .save_message(
-                conversation_id,
-                "assistant",
-                "second answer",
-                None,
-                None,
-                None,
-            )
-            .expect("save second assistant");
-
-        let latest = db
-            .get_last_user_message(conversation_id, None)
-            .expect("query latest user message");
-        assert_eq!(latest, Some("second user prompt".to_string()));
-
-        let before_second_assistant = db
-            .get_last_user_message(conversation_id, Some(assistant_2))
-            .expect("query user message before second assistant");
-        assert_eq!(
-            before_second_assistant,
-            Some("second user prompt".to_string())
-        );
-
-        let before_first_assistant = db
-            .get_last_user_message(conversation_id, Some(assistant_1))
-            .expect("query user message before first assistant");
-        assert_eq!(
-            before_first_assistant,
-            Some("first user prompt".to_string())
-        );
-
-        let err = db
-            .get_last_user_message(conversation_id, Some(assistant_1 - 1))
-            .expect_err("non-assistant anchor must fail");
-        assert!(err.to_string().contains("is not an assistant message"));
-
-        let _ = std::fs::remove_file(db_path);
-    }
-
-    #[test]
-    fn truncate_messages_from_removes_anchor_and_suffix() {
-        let db_path = temp_db_path();
-        let mut db = VectorDb::open(&db_path).expect("open db");
-
-        let conversation_id = db
-            .create_conversation("truncate test")
-            .expect("create conversation");
-        let _user_1 = db
-            .save_message(conversation_id, "user", "u1", None, None, None)
-            .expect("save u1");
-        let assistant_1 = db
-            .save_message(conversation_id, "assistant", "a1", None, None, None)
-            .expect("save a1");
-        let _user_2 = db
-            .save_message(conversation_id, "user", "u2", None, None, None)
-            .expect("save u2");
-        let assistant_2 = db
-            .save_message(conversation_id, "assistant", "a2", None, None, None)
-            .expect("save a2");
-
-        let deleted = db
-            .truncate_messages_from(conversation_id, assistant_2)
-            .expect("truncate from assistant");
-        assert_eq!(deleted, 1);
-
-        let messages = db
-            .get_conversation_messages(conversation_id)
-            .expect("load messages");
-        assert_eq!(messages.len(), 3);
-        assert_eq!(messages[0].content, "u1");
-        assert_eq!(messages[1].content, "a1");
-        assert_eq!(messages[2].content, "u2");
-
-        let last_assistant = db
-            .get_last_assistant_message_id(conversation_id)
-            .expect("query last assistant id");
-        assert_eq!(last_assistant, Some(assistant_1));
-
-        let _ = std::fs::remove_file(db_path);
-    }
-
-    #[test]
-    fn edit_user_message_and_truncate_rewrites_history_branch() {
-        let db_path = temp_db_path();
-        let mut db = VectorDb::open(&db_path).expect("open db");
-
-        let conversation_id = db
-            .create_conversation("edit test")
-            .expect("create conversation");
-        let user_1 = db
-            .save_message(conversation_id, "user", "original", None, None, None)
-            .expect("save user");
-        let assistant_1 = db
-            .save_message(conversation_id, "assistant", "a1", None, None, None)
-            .expect("save assistant");
-        let _user_2 = db
-            .save_message(conversation_id, "user", "u2", None, None, None)
-            .expect("save second user");
-
-        let role_err = db
-            .edit_user_message_and_truncate(assistant_1, "should fail")
-            .expect_err("editing assistant message must fail");
-        assert!(role_err.to_string().contains("not a user"));
-
-        let edited_conversation_id = db
-            .edit_user_message_and_truncate(user_1, "updated prompt")
-            .expect("edit user message");
-        assert_eq!(edited_conversation_id, conversation_id);
-
-        let messages = db
-            .get_conversation_messages(conversation_id)
-            .expect("load messages");
-        assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].role, "user");
-        assert_eq!(messages[0].content, "updated prompt");
-
-        let latest_user = db
-            .get_last_user_message(conversation_id, None)
-            .expect("load latest user message");
-        assert_eq!(latest_user, Some("updated prompt".to_string()));
-
-        let err = db
-            .edit_user_message_and_truncate(user_1 + 1000, "x")
-            .expect_err("editing missing message must fail");
-        assert!(err.to_string().contains("not found"));
-
-        let _ = std::fs::remove_file(db_path);
-    }
-
-    #[test]
-    fn run_ledger_roundtrip_persists_events_and_proof() {
-        let db_path = temp_db_path();
-        let mut db = VectorDb::open(&db_path).expect("open db");
-
-        db.create_run(
-            "run-test-1",
-            "42",
-            "2026-02-14T10:00:00Z",
-            "accepted",
-            Some("openai"),
-            Some("gpt-4.1"),
-            Some("policy.v1"),
-            Some("abc123"),
-        )
-        .expect("create run");
-
-        let event_payload = serde_json::json!({
-            "tool": "kb_update",
-            "proof": {
-                "hash_before": "abc",
-                "hash_after": "def",
-                "readback_ok": true
-            }
-        });
-
-        db.append_run_event(
-            "run-test-1",
-            1,
-            "verification",
-            "agent:verification",
-            &event_payload,
-            "2026-02-14T10:00:05Z",
-        )
-        .expect("append run event");
-
-        db.finish_run(
-            "run-test-1",
-            "2026-02-14T10:00:10Z",
-            "completed",
-            3,
-            1,
-            0,
-            10000,
-            Some(
-                &serde_json::to_string(&serde_json::json!({
-                    "input_tokens": 120,
-                    "output_tokens": 45,
-                    "total_tokens": 165,
-                    "reasoning_tokens": 10,
-                }))
-                .expect("serialize token usage"),
-            ),
-        )
-        .expect("finish run");
-
-        let status: String = db
-            .conn
-            .query_row(
-                "SELECT status FROM runs WHERE run_id = ?1",
-                params!["run-test-1"],
-                |row| row.get(0),
-            )
-            .expect("query run status");
-        assert_eq!(status, "completed");
-
-        let payload_raw: String = db
-            .conn
-            .query_row(
-                "SELECT payload FROM run_events WHERE run_id = ?1",
-                params!["run-test-1"],
-                |row| row.get(0),
-            )
-            .expect("query run event payload");
-        let payload: serde_json::Value =
-            serde_json::from_str(&payload_raw).expect("parse run event payload");
-        assert_eq!(
-            payload
-                .pointer("/proof/hash_before")
-                .and_then(|v| v.as_str()),
-            Some("abc")
-        );
-        assert_eq!(
-            payload
-                .pointer("/proof/hash_after")
-                .and_then(|v| v.as_str()),
-            Some("def")
-        );
-        assert_eq!(
-            payload
-                .pointer("/proof/readback_ok")
-                .and_then(|v| v.as_bool()),
-            Some(true)
-        );
-        let token_usage_raw: Option<String> = db
-            .conn
-            .query_row(
-                "SELECT token_usage FROM runs WHERE run_id = ?1",
-                params!["run-test-1"],
-                |row| row.get(0),
-            )
-            .expect("query run token usage");
-        let token_usage: serde_json::Value = serde_json::from_str(
-            token_usage_raw
-                .as_deref()
-                .expect("token usage should be present"),
-        )
-        .expect("parse token usage");
-        assert_eq!(
-            token_usage.get("input_tokens"),
-            Some(&serde_json::json!(120))
-        );
-        assert_eq!(
-            token_usage.get("output_tokens"),
-            Some(&serde_json::json!(45))
-        );
-        assert_eq!(
-            token_usage.get("total_tokens"),
-            Some(&serde_json::json!(165))
-        );
-
-        let _ = std::fs::remove_file(db_path);
-    }
-}
+mod tests;

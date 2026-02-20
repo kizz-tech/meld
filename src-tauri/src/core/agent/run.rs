@@ -492,7 +492,11 @@ impl Agent {
             let tools_clone = tools.clone();
             let llm = self.llm.clone();
 
-            let thinking_budget = if iteration == 0 { Some(4096) } else { Some(1024) };
+            let thinking_budget = if iteration == 0 {
+                Some(4096)
+            } else {
+                Some(1024)
+            };
             let llm_handle = tokio::spawn(async move {
                 llm.chat_stream(LlmChatRequest {
                     api_key: &api_key_for_llm,
@@ -800,6 +804,36 @@ impl Agent {
             }
 
             if tool_calls.is_empty() {
+                if text_response.trim().is_empty() {
+                    let reason = "Model returned an empty response".to_string();
+                    emit_timeline_step(
+                        self.emitter.as_ref(),
+                        &run_id,
+                        iteration,
+                        "done",
+                        None,
+                        None,
+                        Some(reason.clone()),
+                        None,
+                    );
+                    timeline_steps += 1;
+                    emit_timeline_done(self.emitter.as_ref(), &run_id, iteration, timeline_steps);
+                    emit_state_and_finish(
+                        self.emitter.as_ref(),
+                        self.store.as_ref(),
+                        &run_id,
+                        iteration,
+                        AgentState::Failed,
+                        Some(&reason),
+                        total_tool_calls,
+                        total_write_calls,
+                        verify_failures,
+                        run_started,
+                        &total_token_usage,
+                    );
+                    return Err(reason.into());
+                }
+
                 let responding_payload = emit_run_state(
                     self.emitter.as_ref(),
                     &run_id,

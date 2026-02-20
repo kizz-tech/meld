@@ -1,5 +1,6 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useAppStore, type AppState, type ToolResultEvent } from "./store";
+import { buildChatErrorToast, buildReindexErrorToast } from "@/lib/chatErrors";
 
 let unlisteners: UnlistenFn[] = [];
 let activeSetup: Promise<void> | null = null;
@@ -281,15 +282,9 @@ async function doSetupEventListeners() {
         return;
       }
 
-      const errorMessage = {
-        id: crypto.randomUUID(),
-        role: "assistant" as const,
-        content: `Error: ${event.payload}`,
-      };
-      useAppStore.setState((s) => ({
-        messages: [...s.messages, errorMessage],
-        ...resetState,
-      }));
+      const toast = buildChatErrorToast(event.payload);
+      state.showToast(toast.message, toast.options);
+      useAppStore.setState(resetState);
     }),
   );
 
@@ -490,6 +485,16 @@ async function doSetupEventListeners() {
     await listen("index:done", () => {
       useAppStore.getState().setIndexing(false);
       useAppStore.getState().setIndexProgress(null);
+    }),
+  );
+
+  unlisteners.push(
+    await listen<unknown>("index:error", (event) => {
+      const store = useAppStore.getState();
+      const toast = buildReindexErrorToast(event.payload);
+      store.showToast(toast.message, toast.options);
+      store.setIndexing(false);
+      store.setIndexProgress(null);
     }),
   );
 }

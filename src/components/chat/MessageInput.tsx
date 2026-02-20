@@ -7,6 +7,7 @@ import { useAppStore } from "@/lib/store";
 import { selectMessageInputState } from "@/state/selectors";
 import { cancelActiveRun, sendMessage } from "@/lib/tauri";
 import { collectSourcesFromToolResults } from "@/lib/events";
+import { buildChatErrorToast } from "@/lib/chatErrors";
 
 const MAX_TEXTAREA_HEIGHT = 240;
 
@@ -45,8 +46,9 @@ export default function MessageInput({
     setInput("");
 
     const store = useAppStore.getState();
+    const optimisticUserMessageId = crypto.randomUUID();
     store.addMessage({
-      id: crypto.randomUUID(),
+      id: optimisticUserMessageId,
       role: "user",
       content: text,
       timestamp: Date.now(),
@@ -68,16 +70,19 @@ export default function MessageInput({
         await sendMessage(text, activeConversationId);
       }
     } catch (error) {
-      store.addMessage({
-        id: crypto.randomUUID(),
-        role: "assistant",
-        content: `Error: ${String(error)}`,
-        timestamp: Date.now(),
-      });
+      const toast = buildChatErrorToast(error);
+      store.showToast(toast.message, toast.options);
+      useAppStore.setState((state) => ({
+        messages: state.messages.filter((message) => message.id !== optimisticUserMessageId),
+      }));
       store.setStreaming(false);
       store.setAgentActivity(null);
       store.setLatestThinkingSummary(null);
       store.clearThinkingLog();
+      store.clearToolCallLog();
+      store.clearToolResultLog();
+      store.clearTimeline();
+      store.clearStreamingContent();
       store.setStreamSuppressed(false);
     }
   }, [input, isStreaming, activeConversationId, onSendMessage]);

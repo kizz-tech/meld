@@ -1,11 +1,13 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex};
 
 /// Bump this when adding new fields with non-trivial defaults.
 /// When a loaded config has a lower version, it is re-saved to disk
 /// so that users see the new keys in their `config.toml`.
 const CURRENT_CONFIG_VERSION: u32 = 2;
+static GLOBAL_SETTINGS_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 fn default_retrieval_rerank_enabled() -> bool {
     true
@@ -55,6 +57,8 @@ pub struct Settings {
     pub retrieval_rerank_top_k: u32,
     pub search_provider: Option<String>,
     pub searxng_base_url: Option<String>,
+    #[serde(default)]
+    pub recent_vaults: Vec<String>,
     pub openai_api_key: Option<String>,
     pub anthropic_api_key: Option<String>,
     pub google_api_key: Option<String>,
@@ -108,6 +112,7 @@ impl Default for Settings {
             retrieval_rerank_top_k: default_retrieval_rerank_top_k(),
             search_provider: None,
             searxng_base_url: None,
+            recent_vaults: Vec::new(),
             openai_api_key: None,
             anthropic_api_key: None,
             google_api_key: None,
@@ -128,17 +133,22 @@ impl Settings {
     }
 
     fn normalize_model_id(provider: &str, model: &str) -> Option<String> {
-        if let Some((p, m)) = Self::split_model_id(model) {
-            return Some(format!("{p}:{m}"));
-        }
-
         let provider = provider.trim();
         let model = model.trim();
         if provider.is_empty() || model.is_empty() {
             return None;
         }
 
-        Some(format!("{provider}:{model}"))
+        let mut normalized_model = model.to_string();
+        while let Some((model_provider, model_name)) = Self::split_model_id(&normalized_model) {
+            if model_provider.eq_ignore_ascii_case(provider) {
+                normalized_model = model_name.to_string();
+                continue;
+            }
+            break;
+        }
+
+        Some(format!("{provider}:{normalized_model}"))
     }
 
     fn default_embedding_model_id(provider: &str) -> String {
@@ -146,6 +156,71 @@ impl Settings {
             "google" => "google:gemini-embedding-001".to_string(),
             _ => "openai:text-embedding-3-small".to_string(),
         }
+    }
+
+    fn normalize_vault_path(path: &str) -> Option<String> {
+        let mut normalized = path.trim().replace('\\', "/");
+        if normalized.is_empty() {
+            return None;
+        }
+
+        while normalized.ends_with('/') && normalized.len() > 1 {
+            let is_windows_drive_root =
+                normalized.len() == 3 && normalized.as_bytes().get(1) == Some(&b':');
+            if is_windows_drive_root {
+                break;
+            }
+            normalized.pop();
+        }
+
+        Some(normalized)
+    }
+
+    #[cfg(windows)]
+    fn same_vault_path(left: &str, right: &str) -> bool {
+        left.eq_ignore_ascii_case(right)
+    }
+
+    #[cfg(not(windows))]
+    fn same_vault_path(left: &str, right: &str) -> bool {
+        left == right
+    }
+
+    fn sanitize_vault_paths(&mut self) -> bool {
+        let previous_vault_path = self.vault_path.clone();
+        let previous_recent = self.recent_vaults.clone();
+
+        self.vault_path = self
+            .vault_path
+            .as_deref()
+            .and_then(Self::normalize_vault_path);
+
+        let mut normalized_recent: Vec<String> = Vec::new();
+        for path in &self.recent_vaults {
+            let Some(normalized_path) = Self::normalize_vault_path(path) else {
+                continue;
+            };
+            if normalized_recent
+                .iter()
+                .any(|existing| Self::same_vault_path(existing, &normalized_path))
+            {
+                continue;
+            }
+            normalized_recent.push(normalized_path);
+            if normalized_recent.len() >= 10 {
+                break;
+            }
+        }
+        self.recent_vaults = normalized_recent;
+
+        if let Some(active_vault_path) = self.vault_path.clone() {
+            self.recent_vaults
+                .retain(|path| !Self::same_vault_path(path, &active_vault_path));
+            self.recent_vaults.insert(0, active_vault_path);
+            self.recent_vaults.truncate(10);
+        }
+
+        self.vault_path != previous_vault_path || self.recent_vaults != previous_recent
     }
 
     fn global_config_dir() -> PathBuf {
@@ -212,7 +287,7 @@ impl Settings {
         merged
     }
 
-    pub fn load_global() -> Self {
+    fn load_global_unlocked() -> Self {
         let path = Self::global_config_path();
         if path.exists() {
             let content = std::fs::read_to_string(&path).unwrap_or_default();
@@ -227,15 +302,18 @@ impl Settings {
                 }
             };
             settings.hydrate_legacy_api_keys();
+            let mut should_save = settings.sanitize_vault_paths();
 
             // Re-save when config is from an older version so new fields
             // (with their defaults) appear in the file on disk.
             if settings.config_version < CURRENT_CONFIG_VERSION {
                 settings.config_version = CURRENT_CONFIG_VERSION;
-                if let Err(e) = settings.save() {
-                    eprintln!(
-                        "[config] Failed to migrate config to v{CURRENT_CONFIG_VERSION}: {e}"
-                    );
+                should_save = true;
+            }
+
+            if should_save {
+                if let Err(e) = settings.save_unlocked() {
+                    eprintln!("[config] Failed to save normalized config: {e}");
                 }
             }
 
@@ -248,12 +326,39 @@ impl Settings {
         }
     }
 
-    pub fn save(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn load_global() -> Self {
+        let _guard = GLOBAL_SETTINGS_LOCK
+            .lock()
+            .expect("global settings lock poisoned");
+        Self::load_global_unlocked()
+    }
+
+    fn save_unlocked(&self) -> Result<(), Box<dyn std::error::Error>> {
         let global_dir = Self::global_config_dir();
         std::fs::create_dir_all(&global_dir)?;
         let content = toml::to_string_pretty(self)?;
         std::fs::write(Self::global_config_path(), &content)?;
         Ok(())
+    }
+
+    pub fn save(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let _guard = GLOBAL_SETTINGS_LOCK
+            .lock()
+            .map_err(|_| std::io::Error::other("settings lock poisoned"))?;
+        self.save_unlocked()
+    }
+
+    pub fn update_global<F>(mutator: F) -> Result<(), String>
+    where
+        F: FnOnce(&mut Settings) -> Result<(), String>,
+    {
+        let _guard = GLOBAL_SETTINGS_LOCK
+            .lock()
+            .map_err(|_| "Global settings lock poisoned".to_string())?;
+        let mut settings = Self::load_global_unlocked();
+        mutator(&mut settings)?;
+        settings.sanitize_vault_paths();
+        settings.save_unlocked().map_err(|e| e.to_string())
     }
 
     pub fn set_api_key(&mut self, provider: &str, key: &str) {
@@ -277,7 +382,7 @@ impl Settings {
             Some(normalized_key)
         };
 
-        match provider {
+        match normalized_provider.as_str() {
             "openai" => self.openai_api_key = legacy_value.clone(),
             "anthropic" => self.anthropic_api_key = legacy_value.clone(),
             "google" => self.google_api_key = legacy_value.clone(),
@@ -556,6 +661,16 @@ impl Settings {
         self.retrieval_rerank_top_k.clamp(1, 50) as usize
     }
 
+    pub fn push_recent_vault(&mut self, path: &str) {
+        let Some(normalized) = Self::normalize_vault_path(path) else {
+            return;
+        };
+        self.recent_vaults
+            .retain(|v| !Self::same_vault_path(v, &normalized));
+        self.recent_vaults.insert(0, normalized);
+        self.recent_vaults.truncate(10);
+    }
+
     pub fn api_key_for_provider(&self, provider: &str) -> Option<String> {
         let normalized_provider = provider.trim().to_ascii_lowercase();
         if let Some(value) = self.api_keys.get(&normalized_provider) {
@@ -647,6 +762,57 @@ mod tests {
     }
 
     #[test]
+    fn set_api_key_normalizes_provider_for_legacy_fields() {
+        let mut settings = Settings::default();
+        settings.set_api_key(" OpenAI ", "sk-test");
+
+        assert_eq!(
+            settings.api_key_for_provider("openai"),
+            Some("sk-test".to_string())
+        );
+        assert_eq!(settings.openai_api_key, Some("sk-test".to_string()));
+    }
+
+    #[test]
+    fn push_recent_vault_normalizes_and_deduplicates() {
+        let mut settings = Settings::default();
+        settings.push_recent_vault(" /tmp/meld/vault/ ");
+        settings.push_recent_vault("\\tmp\\meld\\vault\\");
+        settings.push_recent_vault("/tmp/meld/other");
+
+        assert_eq!(
+            settings.recent_vaults,
+            vec!["/tmp/meld/other".to_string(), "/tmp/meld/vault".to_string(),]
+        );
+    }
+
+    #[test]
+    fn sanitize_vault_paths_promotes_active_vault_and_limits_recent() {
+        let mut settings = Settings::default();
+        settings.vault_path = Some("/tmp/meld/vault/".to_string());
+        settings.recent_vaults = vec![
+            "".to_string(),
+            "/tmp/meld/other/".to_string(),
+            "/tmp/meld/other".to_string(),
+            "/tmp/meld/vault".to_string(),
+            "/tmp/meld/three".to_string(),
+        ];
+
+        let changed = settings.sanitize_vault_paths();
+
+        assert!(changed);
+        assert_eq!(settings.vault_path, Some("/tmp/meld/vault".to_string()));
+        assert_eq!(
+            settings.recent_vaults,
+            vec![
+                "/tmp/meld/vault".to_string(),
+                "/tmp/meld/other".to_string(),
+                "/tmp/meld/three".to_string(),
+            ]
+        );
+    }
+
+    #[test]
     fn retrieval_rerank_top_k_is_clamped() {
         let mut settings = Settings::default();
         settings.retrieval_rerank_top_k = 0;
@@ -668,6 +834,41 @@ mod tests {
         assert_eq!(
             settings.embedding_model_id(),
             "openai:text-embedding-3-small".to_string()
+        );
+    }
+
+    #[test]
+    fn set_model_preserves_provider_when_model_name_contains_colon() {
+        let mut settings = Settings::default();
+        settings.set_model("openrouter", "deepseek/deepseek-r1-0528:free");
+
+        assert_eq!(settings.chat_provider(), "openrouter");
+        assert_eq!(
+            settings.chat_model(),
+            "deepseek/deepseek-r1-0528:free".to_string()
+        );
+        assert_eq!(
+            settings.chat_model_id(),
+            "openrouter:deepseek/deepseek-r1-0528:free".to_string()
+        );
+    }
+
+    #[test]
+    fn set_model_collapses_nested_same_provider_prefixes() {
+        let mut settings = Settings::default();
+        settings.set_model(
+            "openrouter",
+            "openrouter:openrouter:deepseek/deepseek-r1-0528:free",
+        );
+
+        assert_eq!(settings.chat_provider(), "openrouter");
+        assert_eq!(
+            settings.chat_model(),
+            "deepseek/deepseek-r1-0528:free".to_string()
+        );
+        assert_eq!(
+            settings.chat_model_id(),
+            "openrouter:deepseek/deepseek-r1-0528:free".to_string()
         );
     }
 

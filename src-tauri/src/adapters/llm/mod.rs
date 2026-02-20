@@ -168,6 +168,19 @@ fn is_non_retriable_auth_error(message: &str) -> bool {
         || msg.contains("invalid api key")
 }
 
+fn is_tool_routing_unsupported_error(message: &str) -> bool {
+    let msg = message.to_ascii_lowercase();
+    msg.contains("no endpoints found that support tool use")
+        || (msg.contains("tool use") && msg.contains("provider-selection"))
+}
+
+fn should_retry_provider_error(message: &str) -> bool {
+    if is_non_retriable_auth_error(message) || is_tool_routing_unsupported_error(message) {
+        return false;
+    }
+    is_retriable_provider_error(message)
+}
+
 async fn run_chat_with_retries(
     provider: &dyn crate::adapters::providers::LlmProvider,
     model: &str,
@@ -198,7 +211,7 @@ async fn run_chat_with_retries(
             Err(err) => {
                 let message = err.to_string();
                 last_error = message.clone();
-                if is_non_retriable_auth_error(&message) || !is_retriable_provider_error(&message) {
+                if !should_retry_provider_error(&message) {
                     return Err(message);
                 }
 
@@ -231,10 +244,24 @@ pub async fn chat_stream(
     tx: mpsc::UnboundedSender<StreamEvent>,
     thinking_budget: Option<u32>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let model_id = if model.contains(':') {
-        model.to_string()
+    let provider_id = provider.trim();
+    let model_name = model.trim();
+    let model_id = if provider_id.contains('/') && !provider_id.contains(' ') {
+        // Backward-compat: old configs could persist OpenRouter model slug as provider,
+        // e.g. provider="deepseek/deepseek-r1-0528", model="free".
+        let stitched_model = if model_name.is_empty() {
+            provider_id.to_string()
+        } else {
+            format!("{provider_id}:{model_name}")
+        };
+        format!("openrouter:{stitched_model}")
     } else {
-        format!("{}:{}", provider.trim(), model.trim())
+        match crate::adapters::providers::split_model_id(model_name) {
+            Ok((split_provider, _)) if split_provider.eq_ignore_ascii_case(provider_id) => {
+                model_name.to_string()
+            }
+            _ => format!("{provider_id}:{model_name}"),
+        }
     };
 
     let registry = crate::adapters::providers::ProviderRegistry::default();
@@ -270,7 +297,13 @@ pub async fn chat_stream(
     .await
     {
         Ok(()) => Ok(()),
-        Err(primary_error) => {
+        Err(mut primary_error) => {
+            if tools.is_some() && is_tool_routing_unsupported_error(&primary_error) {
+                primary_error = format!(
+                    "{primary_error}. The selected model does not support tool use on OpenRouter. Choose a tool-capable model."
+                );
+            }
+
             let mut settings = crate::adapters::config::Settings::load_global();
             let fallback_model_id = settings.fallback_chat_model_id();
 
@@ -282,7 +315,9 @@ pub async fn chat_stream(
                 if let Ok((fallback_provider, fallback_model)) =
                     registry.resolve_llm(&fallback_model_id)
                 {
-                    if tools.is_some() && !fallback_provider.supports_tools() {
+                    let fallback_tools = tools;
+
+                    if fallback_tools.is_some() && !fallback_provider.supports_tools() {
                         return Err(format!(
                             "Primary failed ({primary_error}); fallback '{}' does not support tool calls",
                             fallback_provider.id()
@@ -322,7 +357,7 @@ pub async fn chat_stream(
                             fallback_model,
                             &fallback_key,
                             messages,
-                            tools,
+                            fallback_tools,
                             &tx,
                             thinking_budget,
                         )
@@ -379,7 +414,9 @@ impl LlmPort for ChatLlmAdapter {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_non_retriable_auth_error, is_retriable_provider_error};
+    use super::{
+        is_non_retriable_auth_error, is_retriable_provider_error, should_retry_provider_error,
+    };
 
     #[test]
     fn retriable_error_detection_handles_rate_limit_and_timeout() {
@@ -393,5 +430,12 @@ mod tests {
         assert!(is_non_retriable_auth_error("401 unauthorized"));
         assert!(is_non_retriable_auth_error("403 Forbidden"));
         assert!(is_non_retriable_auth_error("invalid api key"));
+    }
+
+    #[test]
+    fn tool_routing_errors_are_not_retried_even_if_wrapped_in_5xx() {
+        let message = "OpenRouter API error (500): {\"error\":{\"message\":\"No endpoints found that support tool use. To learn more about provider routing, visit: https://openrouter.ai/docs/guides/routing/provider-selection\",\"code\":404}}";
+        assert!(is_retriable_provider_error(message));
+        assert!(!should_retry_provider_error(message));
     }
 }

@@ -2,6 +2,7 @@
 
 import { memo, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { Pin } from "lucide-react";
+import { FolderIconGlyph } from "@/components/folders/folderIcons";
 
 export interface ChatFolderRowHandlers {
   toggleFolderExpanded: (folderId: string) => void;
@@ -19,6 +20,7 @@ export interface ChatFolderRowHandlers {
 export interface ChatFolderRowProps {
   folderId: string;
   name: string;
+  icon: string | null;
   depth: number;
   isExpanded: boolean;
   isDrop: boolean;
@@ -45,6 +47,7 @@ const ChatFolderRow = memo(
   function ChatFolderRow({
     folderId,
     name,
+    icon,
     depth,
     isExpanded,
     isDrop,
@@ -101,11 +104,27 @@ const ChatFolderRow = memo(
           >
             <span className="mr-1 text-[11px]">{isExpanded ? "▾" : "▸"}</span>
             <span className="min-w-0 flex-1 truncate">{name}</span>
-            {isPinned && <PinIcon />}
+            {(isPinned || Boolean(icon)) && (
+              <span className="ml-1 flex shrink-0 items-center gap-1">
+                {isPinned && <PinIcon />}
+                <span className="inline-flex h-3.5 w-3.5 items-center justify-center">
+                  <FolderIconGlyph icon={icon} className="h-3.5 w-3.5 text-text-muted/80" />
+                </span>
+              </span>
+            )}
           </button>
         )}
 
-        {isExpanded && <div>{children}</div>}
+        {isExpanded && (
+          <div className="relative mt-0.5">
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute bottom-1 top-1 w-px rounded-full bg-overlay-8/80"
+              style={{ left: `${10 + depth * 12}px` }}
+            />
+            <div className="relative py-1">{children}</div>
+          </div>
+        )}
       </div>
     );
   },
@@ -120,6 +139,7 @@ const ChatFolderRow = memo(
     return (
       prev.folderId === next.folderId &&
       prev.name === next.name &&
+      prev.icon === next.icon &&
       prev.depth === next.depth &&
       prev.isExpanded === next.isExpanded &&
       prev.isDrop === next.isDrop &&

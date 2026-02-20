@@ -1,12 +1,46 @@
 use tauri::AppHandle;
 
 use crate::adapters::config::Settings;
+use crate::adapters::providers::split_model_id;
 
 use super::assistant::spawn_assistant_task;
 use super::shared::{
     current_db_path, parse_conversation_id, parse_message_id, resolve_provider_credential,
     title_from_first_user_message, SendMessageResponse,
 };
+
+fn resolve_provider_and_model_for_conversation(
+    settings: &Settings,
+    db: &crate::adapters::vectordb::VectorDb,
+    conversation_id: i64,
+) -> Result<(String, String), String> {
+    let folder_model_id = db
+        .resolve_conversation_chat_model_id(conversation_id)
+        .map_err(|e| e.to_string())?;
+
+    if let Some(model_id) = folder_model_id {
+        match split_model_id(&model_id) {
+            Ok((provider, model)) => return Ok((provider.to_string(), model.to_string())),
+            Err(error) => {
+                log::warn!(
+                    "Invalid folder default_model_id '{}' for conversation {}. Falling back to settings model: {}",
+                    model_id,
+                    conversation_id,
+                    error
+                );
+            }
+        }
+    }
+
+    Ok((settings.chat_provider(), settings.chat_model()))
+}
+
+fn parse_folder_id(folder_id: &str) -> Result<i64, String> {
+    folder_id
+        .trim()
+        .parse::<i64>()
+        .map_err(|_| format!("Invalid folder_id: {folder_id}"))
+}
 
 #[tauri::command]
 pub async fn create_conversation(title: Option<String>) -> Result<String, String> {
@@ -176,6 +210,7 @@ pub async fn send_message(
     app: AppHandle,
     message: String,
     conversation_id: Option<String>,
+    folder_id: Option<String>,
 ) -> Result<SendMessageResponse, String> {
     let global_settings = Settings::load_global();
     let vault_path = global_settings
@@ -186,33 +221,42 @@ pub async fn send_message(
     let vault_config =
         crate::adapters::config::VaultConfig::load(std::path::Path::new(&vault_path));
     let mut settings = global_settings.merged_with_vault(&vault_config);
-    let provider = settings.chat_provider();
-    let api_key = resolve_provider_credential(&mut settings, &provider).await?;
-    let model = settings.chat_model();
 
     let db_path = current_db_path(&settings)?;
-    let mut db = crate::adapters::vectordb::VectorDb::open(&db_path).map_err(|e| e.to_string())?;
+    let existing_conversation_id = conversation_id
+        .as_deref()
+        .map(parse_conversation_id)
+        .transpose()?;
+    let parsed_folder_id = folder_id.as_deref().map(parse_folder_id).transpose()?;
 
-    let conversation_id = match conversation_id {
-        Some(existing_id) => {
-            let parsed_id = parse_conversation_id(&existing_id)?;
-            let exists = db
-                .conversation_exists(parsed_id)
+    let mut db = crate::adapters::vectordb::VectorDb::open(&db_path).map_err(|e| e.to_string())?;
+    let conversation_id = if let Some(parsed_id) = existing_conversation_id {
+        let exists = db
+            .conversation_exists(parsed_id)
+            .map_err(|e| e.to_string())?;
+        if !exists {
+            return Err(format!("Conversation {} not found", parsed_id));
+        }
+        parsed_id
+    } else {
+        let title = title_from_first_user_message(&message);
+        let created_id = db.create_conversation(&title).map_err(|e| e.to_string())?;
+        if let Some(target_folder_id) = parsed_folder_id {
+            db.set_conversation_folder(created_id, Some(target_folder_id))
                 .map_err(|e| e.to_string())?;
-            if !exists {
-                return Err(format!("Conversation {} not found", existing_id));
-            }
-            parsed_id
         }
-        None => {
-            let title = title_from_first_user_message(&message);
-            db.create_conversation(&title).map_err(|e| e.to_string())?
-        }
+        created_id
     };
 
+    let (provider, model) =
+        resolve_provider_and_model_for_conversation(&settings, &db, conversation_id)?;
+    drop(db);
+
+    let api_key = resolve_provider_credential(&mut settings, &provider).await?;
+
+    let mut db = crate::adapters::vectordb::VectorDb::open(&db_path).map_err(|e| e.to_string())?;
     db.save_message(conversation_id, "user", &message, None, None, None)
         .map_err(|e| e.to_string())?;
-    drop(db);
 
     spawn_assistant_task(
         app,
@@ -246,12 +290,21 @@ pub async fn regenerate_last_response(
     let vault_config =
         crate::adapters::config::VaultConfig::load(std::path::Path::new(&vault_path));
     let mut settings = global_settings.merged_with_vault(&vault_config);
-    let provider = settings.chat_provider();
-    let api_key = resolve_provider_credential(&mut settings, &provider).await?;
-    let model = settings.chat_model();
 
     let db_path = current_db_path(&settings)?;
     let parsed_conversation_id = parse_conversation_id(&conversation_id)?;
+
+    let (provider, model) = {
+        let db = crate::adapters::vectordb::VectorDb::open(&db_path).map_err(|e| e.to_string())?;
+        let exists = db
+            .conversation_exists(parsed_conversation_id)
+            .map_err(|e| e.to_string())?;
+        if !exists {
+            return Err(format!("Conversation {} not found", conversation_id));
+        }
+        resolve_provider_and_model_for_conversation(&settings, &db, parsed_conversation_id)?
+    };
+    let api_key = resolve_provider_credential(&mut settings, &provider).await?;
 
     let mut db = crate::adapters::vectordb::VectorDb::open(&db_path).map_err(|e| e.to_string())?;
     let exists = db
@@ -313,12 +366,19 @@ pub async fn edit_user_message(
     let vault_config =
         crate::adapters::config::VaultConfig::load(std::path::Path::new(&vault_path));
     let mut settings = global_settings.merged_with_vault(&vault_config);
-    let provider = settings.chat_provider();
-    let api_key = resolve_provider_credential(&mut settings, &provider).await?;
-    let model = settings.chat_model();
 
     let parsed_message_id = parse_message_id(&message_id)?;
     let db_path = current_db_path(&settings)?;
+
+    let (provider, model) = {
+        let db = crate::adapters::vectordb::VectorDb::open(&db_path).map_err(|e| e.to_string())?;
+        let conversation_id = db
+            .get_message_conversation_id(parsed_message_id)
+            .map_err(|e| e.to_string())?;
+        resolve_provider_and_model_for_conversation(&settings, &db, conversation_id)?
+    };
+    let api_key = resolve_provider_credential(&mut settings, &provider).await?;
+
     let mut db = crate::adapters::vectordb::VectorDb::open(&db_path).map_err(|e| e.to_string())?;
     let conversation_id = db
         .edit_user_message_and_truncate(parsed_message_id, &normalized_content)

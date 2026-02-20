@@ -142,9 +142,11 @@ pub async fn query(
     let mut retrieval_embedding = query_embedding.clone();
     let skip_hyde = chunk_count < 100;
     if !skip_hyde && should_use_hyde(query) {
-        let hyde_result =
-            tokio::time::timeout(std::time::Duration::from_secs(8), generate_hyde_document(query))
-                .await;
+        let hyde_result = tokio::time::timeout(
+            std::time::Duration::from_secs(8),
+            generate_hyde_document(query),
+        )
+        .await;
         if let Ok(Some(hyde_document)) = hyde_result {
             if let Ok(hyde_embedding) = crate::adapters::embeddings::get_embedding(
                 api_key,
