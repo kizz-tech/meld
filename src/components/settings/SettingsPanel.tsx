@@ -37,6 +37,7 @@ const KNOWN_MODELS: Record<string, ComboOption[]> = {
     { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
   ],
   google: [
+    { value: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro" },
     { value: "gemini-3-pro-preview", label: "Gemini 3 Pro" },
     { value: "gemini-3-flash-preview", label: "Gemini 3 Flash" },
   ],
