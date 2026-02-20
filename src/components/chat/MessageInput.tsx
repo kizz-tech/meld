@@ -161,7 +161,7 @@ export default function MessageInput({
 
   return (
     <div className="absolute bottom-6 left-0 right-0 px-6 flex justify-center pointer-events-none z-20">
-      <div className="pointer-events-auto flex w-full max-w-3xl items-center gap-2 rounded-[28px] bg-bg border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.6)] ring-1 ring-white/5 p-2">
+      <div className="pointer-events-auto flex w-full max-w-3xl items-center gap-2 rounded-[28px] bg-bg border border-overlay-10 shadow-[0_8px_32px_rgba(0,0,0,0.6)] ring-1 ring-overlay-5 p-2">
         <textarea
           ref={textareaRef}
           value={input}
@@ -186,7 +186,7 @@ export default function MessageInput({
             onClick={() => {
               void handleStop();
             }}
-            className="flex h-[40px] w-[40px] shrink-0 items-center justify-center rounded-full bg-white/10 text-text-secondary shadow-sm transition-all duration-[120ms] hover:scale-105 hover:bg-white/15 hover:text-text active:scale-95"
+            className="flex h-[40px] w-[40px] shrink-0 items-center justify-center rounded-full bg-overlay-10 text-text-secondary shadow-sm transition-all duration-[120ms] hover:scale-105 hover:bg-overlay-15 hover:text-text active:scale-95"
             title="Stop generation"
           >
             <span className="h-3 w-3 rounded-[2px] bg-current" />

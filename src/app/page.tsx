@@ -10,6 +10,7 @@ import SettingsPanel from "@/components/settings/SettingsPanel";
 import HistoryPanel from "@/components/history/HistoryPanel";
 import StatusBar from "@/components/ui/StatusBar";
 import MeldLogo from "@/components/ui/MeldLogo";
+import MeldMark from "@/components/ui/MeldMark";
 import { useAppStore } from "@/lib/store";
 import WindowControls from "@/components/ui/WindowControls";
 import { History, Settings } from "lucide-react";
@@ -73,9 +74,9 @@ export default function Home() {
     : state.chatProvider || "—";
 
   return (
-    <div className="relative flex h-full w-full rounded-[28px] bg-bg border border-white/[0.06] overflow-hidden">
+    <div className="relative flex h-full w-full rounded-[28px] bg-bg border border-overlay-6 overflow-hidden">
       {/* Sidebar Wrapper */}
-      <div className="relative flex h-full shrink-0 flex-col border-r border-white/5">
+      <div className="relative flex h-full shrink-0 flex-col border-r border-overlay-5">
         <Sidebar
           conversations={state.conversations}
           activeConversationId={state.activeConversationId}
@@ -99,24 +100,24 @@ export default function Home() {
       </div>
 
       {/* Main area Wrapper */}
-      <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-black/10">
+      <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-scrim-10">
         <div
           aria-hidden
-          className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(52%_44%_at_50%_18%,rgba(232,228,220,0.04)_0%,rgba(232,228,220,0)_75%)]"
+          className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(52%_44%_at_50%_18%,var(--color-glow)_0%,transparent_75%)]"
         />
 
         {/* Header */}
         <header
-          className="relative z-10 flex h-[44px] items-center justify-between border-b border-white/5 px-4 select-none"
+          className="relative z-10 flex h-[44px] items-center justify-between border-b border-overlay-5 px-4 select-none"
         >
           {/* Drag surface — behind interactive content */}
           <div data-tauri-drag-region className="absolute inset-0" />
           <div className="relative z-10 flex items-center gap-2">
-            <MeldLogo className="h-4 w-4 text-accent" />
+            <MeldMark className="h-4 w-4" />
             <span className="font-display italic text-[14px] font-medium text-text-secondary">
               meld
             </span>
-            <span className="ml-2 px-2 py-0.5 rounded-lg bg-white/5 font-mono text-[10px] text-text-muted">
+            <span className="ml-2 px-2 py-0.5 rounded-lg bg-overlay-5 font-mono text-[10px] text-text-muted">
               {state.vaultName || "No Vault"}
             </span>
           </div>
@@ -125,7 +126,7 @@ export default function Home() {
               onClick={actions.toggleHistory}
               className={`flex h-7 w-7 items-center justify-center rounded-xl transition-colors ${state.showHistory
                 ? "bg-bg-tertiary text-text"
-                : "text-text-muted hover:bg-white/5 hover:text-text"
+                : "text-text-muted hover:bg-overlay-5 hover:text-text"
                 }`}
               title="History"
             >
@@ -135,14 +136,14 @@ export default function Home() {
               onClick={actions.toggleSettings}
               className={`flex h-7 w-7 items-center justify-center rounded-xl transition-colors ${state.showSettings
                 ? "bg-bg-tertiary text-text"
-                : "text-text-muted hover:bg-white/5 hover:text-text"
+                : "text-text-muted hover:bg-overlay-5 hover:text-text"
                 }`}
               title="Settings"
             >
               <Settings className="h-4 w-4" />
             </button>
             {/* Windows / Linux controls on the right */}
-            <div className="ml-2 border-l border-white/5 pl-2 h-full hidden sm:flex items-center">
+            <div className="ml-2 border-l border-overlay-5 pl-2 h-full hidden sm:flex items-center">
               <WindowControls placement="right" />
             </div>
           </div>
@@ -170,9 +171,9 @@ export default function Home() {
                 />
               </div>
               <aside
-                className={`shrink-0 overflow-hidden bg-black/20 transition-[width,border-color] duration-[280ms] ease-out ${
+                className={`shrink-0 overflow-hidden bg-scrim-20 transition-[width,border-color] duration-[280ms] ease-out ${
                   state.activeNote
-                    ? "w-[420px] border-l border-white/5"
+                    ? "w-[420px] border-l border-overlay-5"
                     : "w-0 border-l border-transparent"
                 }`}
               >

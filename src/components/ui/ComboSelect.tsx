@@ -81,7 +81,7 @@ export default function ComboSelect({
         className={`flex items-center rounded-xl border text-sm transition-colors ${
           focused
             ? "border-border-focus bg-bg shadow-[0_0_0_1px_var(--color-border-focus)]"
-            : "border-border/50 bg-white/[0.03]"
+            : "border-border/50 bg-overlay-3"
         }`}
       >
         <input

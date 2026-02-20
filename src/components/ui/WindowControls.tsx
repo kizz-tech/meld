@@ -89,14 +89,14 @@ export default function WindowControls({ placement = "right" }: WindowControlsPr
         <div className="flex items-center">
             <button
                 onClick={handleMinimize}
-                className="flex h-[32px] w-[46px] items-center justify-center text-text-muted transition-colors hover:bg-white/10 hover:text-text"
+                className="flex h-[32px] w-[46px] items-center justify-center text-text-muted transition-colors hover:bg-overlay-10 hover:text-text"
                 title="Minimize"
             >
                 <Minus className="h-4 w-4" />
             </button>
             <button
                 onClick={handleMaximize}
-                className="flex h-[32px] w-[46px] items-center justify-center text-text-muted transition-colors hover:bg-white/10 hover:text-text"
+                className="flex h-[32px] w-[46px] items-center justify-center text-text-muted transition-colors hover:bg-overlay-10 hover:text-text"
                 title="Maximize"
             >
                 <Square className="h-3.5 w-3.5" />

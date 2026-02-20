@@ -882,7 +882,7 @@ function MessageBubble({
                 rows={1}
                 style={{ maxHeight: 400 }}
                 disabled={savingEdit}
-                className="w-full resize-none overflow-y-auto rounded-[20px] border border-white/[0.08] bg-white/5 px-5 py-3.5 text-sm leading-relaxed text-text outline-none transition-colors focus-visible:border-border-focus focus-visible:shadow-[0_0_0_1px_var(--color-border-focus)]"
+                className="w-full resize-none overflow-y-auto rounded-[20px] border border-overlay-8 bg-overlay-5 px-5 py-3.5 text-sm leading-relaxed text-text outline-none transition-colors focus-visible:border-border-focus focus-visible:shadow-[0_0_0_1px_var(--color-border-focus)]"
               />
               <div className="mt-2 flex items-center justify-end gap-1.5">
                 <button
@@ -909,7 +909,7 @@ function MessageBubble({
               </div>
             </div>
           ) : isUser ? (
-            <div className="max-w-[85%] rounded-[20px] border border-white/[0.06] bg-white/5 px-5 py-3.5">
+            <div className="max-w-[85%] rounded-[20px] border border-overlay-6 bg-overlay-5 px-5 py-3.5">
               <div
                 className={`whitespace-pre-wrap text-sm leading-relaxed text-text ${
                   isLongUserMessage && collapsed ? "line-clamp-6" : ""

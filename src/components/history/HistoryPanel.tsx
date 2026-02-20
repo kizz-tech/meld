@@ -75,7 +75,7 @@ export default function HistoryPanel() {
           {entries.map((entry) => (
             <div
               key={entry.id}
-              className="p-4 bg-bg-secondary/40 border border-white/[0.04] rounded-xl space-y-2.5"
+              className="p-4 bg-bg-secondary/40 border border-overlay-5 rounded-xl space-y-2.5"
             >
               <p className="text-sm">{entry.message}</p>
               <div className="flex items-center justify-between">

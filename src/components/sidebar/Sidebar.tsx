@@ -1269,9 +1269,9 @@ export default function Sidebar({
           {/* Tab switcher — floating */}
           <div className="relative z-[1] px-3 pt-3 pb-3">
             {!sidebarCollapsed && (
-              <div className="relative grid grid-cols-2 rounded-[20px] border border-white/[0.06] bg-white/[0.03] p-1.5">
+              <div className="relative grid grid-cols-2 rounded-[20px] border border-overlay-6 bg-overlay-3 p-1.5">
                 <div
-                  className="absolute left-1.5 top-1.5 bottom-1.5 w-[calc(50%-6px)] rounded-[14px] bg-white/[0.08] transition-transform duration-200 ease-out"
+                  className="absolute left-1.5 top-1.5 bottom-1.5 w-[calc(50%-6px)] rounded-[14px] bg-overlay-8 transition-transform duration-200 ease-out"
                   style={{ transform: viewMode === "files" ? "translateX(100%)" : "translateX(0)" }}
                 />
                 <button
@@ -1298,9 +1298,9 @@ export default function Sidebar({
             )}
 
             {sidebarCollapsed && (
-              <div className="relative flex flex-col gap-0.5 rounded-[20px] border border-white/[0.06] bg-white/[0.03] p-1.5">
+              <div className="relative flex flex-col gap-0.5 rounded-[20px] border border-overlay-6 bg-overlay-3 p-1.5">
                 <div
-                  className="absolute left-1.5 right-1.5 top-1.5 h-[calc(50%-4px)] rounded-[14px] bg-white/[0.08] transition-transform duration-200 ease-out"
+                  className="absolute left-1.5 right-1.5 top-1.5 h-[calc(50%-4px)] rounded-[14px] bg-overlay-8 transition-transform duration-200 ease-out"
                   style={{ transform: viewMode === "files" ? "translateY(calc(100% + 6px))" : "translateY(0)" }}
                 />
                 <button

@@ -96,7 +96,7 @@ export default function OnboardingFlow() {
                   const selected = await open({ directory: true, multiple: false });
                   if (selected) setFolderPath(selected);
                 }}
-                className="px-4 py-3 bg-bg-secondary border border-white/[0.06] rounded-xl text-text-muted hover:text-text hover:border-white/10 transition-colors whitespace-nowrap"
+                className="px-4 py-3 bg-bg-secondary border border-overlay-6 rounded-xl text-text-muted hover:text-text hover:border-overlay-10 transition-colors whitespace-nowrap"
               >
                 Browse
               </button>

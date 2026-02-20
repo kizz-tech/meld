@@ -51,11 +51,11 @@ export default function ConfirmDialog({
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
       <button
         aria-label="Close confirmation dialog"
-        className="absolute inset-0 bg-black/50 animate-overlay-fade"
+        className="absolute inset-0 bg-scrim-50 animate-overlay-fade"
         onClick={onCancel}
       />
 
-      <div className="relative w-full max-w-sm rounded-2xl border border-white/[0.06] bg-bg-secondary/98 p-6 shadow-xl shadow-black/30 backdrop-blur-lg space-y-4 animate-dialog-in">
+      <div className="relative w-full max-w-sm rounded-2xl border border-overlay-6 bg-bg-secondary/98 p-6 shadow-xl shadow-black/30 backdrop-blur-lg space-y-4 animate-dialog-in">
         <h3 className="text-lg font-semibold">{title}</h3>
         {description && (
           <p className="text-sm text-text-secondary whitespace-pre-line">{description}</p>
@@ -64,7 +64,7 @@ export default function ConfirmDialog({
         <div className="flex justify-end gap-2.5 pt-2">
           <button
             onClick={onCancel}
-            className="px-4 py-2 text-sm rounded-xl border border-white/[0.06] bg-bg-tertiary/60 text-text-secondary hover:text-text hover:bg-bg-tertiary transition-colors"
+            className="px-4 py-2 text-sm rounded-xl border border-overlay-6 bg-bg-tertiary/60 text-text-secondary hover:text-text hover:bg-bg-tertiary transition-colors"
           >
             {cancelLabel}
           </button>

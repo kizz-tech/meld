@@ -81,6 +81,10 @@ export default function SettingsPanel() {
   const [userLanguage, setUserLanguageLocal] = useState("");
   const [searchProviderLocal, setSearchProviderLocal] = useState("tavily");
   const [searxngUrlLocal, setSearxngUrlLocal] = useState("http://localhost:8080");
+  const [theme, setThemeLocal] = useState<string>(() => {
+    if (typeof window === "undefined") return "dark";
+    return localStorage.getItem("meld.theme") || "dark";
+  });
   const [reindexError, setReindexError] = useState<string | null>(null);
   const [updateStatus, setUpdateStatus] = useState<
     "idle" | "checking" | "available" | "downloading" | "upToDate" | "error"
@@ -167,6 +171,12 @@ export default function SettingsPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  function handleSetTheme(value: string) {
+    setThemeLocal(value);
+    localStorage.setItem("meld.theme", value);
+    document.documentElement.setAttribute("data-theme", value);
+  }
+
   async function handleSaveKey(provider: string, key: string) {
     await setApiKey(provider, key);
     setSaved(true);
@@ -239,6 +249,38 @@ export default function SettingsPanel() {
         </button>
       </div>
 
+      {/* Appearance */}
+      <section className="space-y-2">
+        <h3 className="text-sm font-medium text-text-secondary">Appearance</h3>
+        <div className="relative grid grid-cols-3 rounded-[20px] border border-overlay-6 bg-overlay-3 p-1.5">
+          <div
+            className="absolute left-1.5 top-1.5 bottom-1.5 w-[calc(33.333%-4px)] rounded-[14px] bg-overlay-8 transition-transform duration-200 ease-out"
+            style={{
+              transform:
+                theme === "dark"
+                  ? "translateX(0)"
+                  : theme === "auto"
+                    ? "translateX(calc(100% + 6px))"
+                    : "translateX(calc(200% + 12px))",
+            }}
+          />
+          {(["dark", "auto", "light"] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              onClick={() => handleSetTheme(option)}
+              className={`relative z-[1] rounded-[14px] px-2.5 py-2 text-xs font-medium capitalize transition-colors duration-200 ${
+                theme === option
+                  ? "text-text"
+                  : "text-text-muted hover:text-text-secondary"
+              }`}
+            >
+              {option === "auto" ? "Auto" : option === "dark" ? "Dark" : "Light"}
+            </button>
+          ))}
+        </div>
+      </section>
+
       {/* Vault */}
       <section className="space-y-2">
         <h3 className="text-sm font-medium text-text-secondary">Vault</h3>
@@ -257,7 +299,7 @@ export default function SettingsPanel() {
                 }
               }
             }}
-            className="text-xs px-3.5 py-2 border border-white/[0.06] bg-bg-tertiary/60 rounded-xl hover:bg-bg-tertiary hover:border-white/10 transition-colors"
+            className="text-xs px-3.5 py-2 border border-overlay-6 bg-bg-tertiary/60 rounded-xl hover:bg-bg-tertiary hover:border-overlay-10 transition-colors"
           >
             Change vault
           </button>
@@ -361,7 +403,7 @@ export default function SettingsPanel() {
             if (userLanguage.trim()) setUserLanguage(userLanguage.trim());
           }}
           placeholder="auto (follows system)"
-          className="w-full p-2 text-sm bg-white/[0.03] border border-border/50 rounded-xl text-text placeholder:text-text-muted focus:outline-none focus:border-border-focus focus:bg-bg focus:shadow-[0_0_0_1px_var(--color-border-focus)]"
+          className="w-full p-2 text-sm bg-overlay-3 border border-border/50 rounded-xl text-text placeholder:text-text-muted focus:outline-none focus:border-border-focus focus:bg-bg focus:shadow-[0_0_0_1px_var(--color-border-focus)]"
         />
       </section>
 
@@ -391,7 +433,7 @@ export default function SettingsPanel() {
               onChange={(e) => setSearxngUrlLocal(e.target.value)}
               onBlur={() => setSearxngBaseUrl(searxngUrlLocal.trim())}
               placeholder="http://localhost:8080"
-              className="w-full p-2 text-sm bg-white/[0.03] border border-border/50 rounded-xl text-text placeholder:text-text-muted focus:outline-none focus:border-border-focus focus:bg-bg focus:shadow-[0_0_0_1px_var(--color-border-focus)]"
+              className="w-full p-2 text-sm bg-overlay-3 border border-border/50 rounded-xl text-text placeholder:text-text-muted focus:outline-none focus:border-border-focus focus:bg-bg focus:shadow-[0_0_0_1px_var(--color-border-focus)]"
             />
             <p className="text-[11px] text-text-muted/70">
               Run locally: docker run -p 8080:8080 searxng/searxng
@@ -442,13 +484,13 @@ export default function SettingsPanel() {
                             ? "BSA..."
                             : "tvly-..."
                 }
-                className="flex-1 p-2 text-sm bg-white/[0.03] border border-border/50 rounded-xl text-text placeholder:text-text-muted focus:outline-none focus:border-border-focus focus:bg-bg focus:shadow-[0_0_0_1px_var(--color-border-focus)]"
+                className="flex-1 p-2 text-sm bg-overlay-3 border border-border/50 rounded-xl text-text placeholder:text-text-muted focus:outline-none focus:border-border-focus focus:bg-bg focus:shadow-[0_0_0_1px_var(--color-border-focus)]"
               />
               <button
                 onClick={() =>
                   handleSaveKey(provider, apiKeys[provider] ?? "")
                 }
-                className="px-3 text-xs border border-white/[0.06] bg-bg-tertiary/60 rounded-xl hover:bg-bg-tertiary hover:border-white/10 transition-colors"
+                className="px-3 text-xs border border-overlay-6 bg-bg-tertiary/60 rounded-xl hover:bg-bg-tertiary hover:border-overlay-10 transition-colors"
               >
                 Save
               </button>
@@ -466,7 +508,7 @@ export default function SettingsPanel() {
           {updateStatus === "idle" && (
             <button
               onClick={handleCheckUpdate}
-              className="text-xs px-3.5 py-2 border border-white/[0.06] bg-bg-tertiary/60 rounded-xl hover:bg-bg-tertiary hover:border-white/10 transition-colors"
+              className="text-xs px-3.5 py-2 border border-overlay-6 bg-bg-tertiary/60 rounded-xl hover:bg-bg-tertiary hover:border-overlay-10 transition-colors"
             >
               Check for updates
             </button>
@@ -484,7 +526,7 @@ export default function SettingsPanel() {
               </p>
               <button
                 onClick={handleInstallUpdate}
-                className="text-xs px-3.5 py-2 border border-white/[0.06] bg-bg-tertiary/60 rounded-xl hover:bg-bg-tertiary hover:border-white/10 transition-colors"
+                className="text-xs px-3.5 py-2 border border-overlay-6 bg-bg-tertiary/60 rounded-xl hover:bg-bg-tertiary hover:border-overlay-10 transition-colors"
               >
                 Download &amp; install
               </button>
@@ -500,7 +542,7 @@ export default function SettingsPanel() {
               <p className="text-xs text-error">{updateError}</p>
               <button
                 onClick={handleCheckUpdate}
-                className="text-xs px-3.5 py-2 border border-white/[0.06] bg-bg-tertiary/60 rounded-xl hover:bg-bg-tertiary hover:border-white/10 transition-colors"
+                className="text-xs px-3.5 py-2 border border-overlay-6 bg-bg-tertiary/60 rounded-xl hover:bg-bg-tertiary hover:border-overlay-10 transition-colors"
               >
                 Retry
               </button>

@@ -23,7 +23,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: `(function(){var t=localStorage.getItem('meld.theme')||'dark';document.documentElement.setAttribute('data-theme',t)})()` }} />
+      </head>
       <body className={`${geistSans.variable} ${geistMono.variable} ${instrumentSerif.variable} antialiased h-screen w-screen overflow-hidden bg-transparent text-text`}>
         {children}
       </body>

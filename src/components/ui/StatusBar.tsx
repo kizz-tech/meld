@@ -25,7 +25,7 @@ export default function StatusBar({
     : `Indexed · ${fileCount} notes`;
 
   return (
-    <footer className="flex h-9 items-center gap-3 border-t border-white/5 bg-black/20 px-4 pb-0.5 font-mono text-[10px] text-text-muted/60">
+    <footer className="flex h-9 items-center gap-3 border-t border-overlay-5 bg-scrim-20 px-4 pb-0.5 font-mono text-[10px] text-text-muted/60">
       <span
         className="min-w-0 flex-1 truncate"
         title={vaultPath ?? "No vault selected"}

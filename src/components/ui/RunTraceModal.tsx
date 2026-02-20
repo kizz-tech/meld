@@ -42,7 +42,7 @@ export default function RunTraceModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden px-4 py-4">
       <button
         aria-label="Close run trace"
-        className="absolute inset-0 animate-overlay-fade bg-black/50"
+        className="absolute inset-0 animate-overlay-fade bg-scrim-50"
         onClick={onClose}
       />
 

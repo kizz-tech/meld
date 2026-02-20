@@ -61,11 +61,11 @@ export default function PromptDialog({
     <div className="fixed inset-0 z-[160] flex items-center justify-center px-4">
       <button
         aria-label="Close prompt dialog"
-        className="absolute inset-0 animate-overlay-fade bg-black/50"
+        className="absolute inset-0 animate-overlay-fade bg-scrim-50"
         onClick={onCancel}
       />
 
-      <div className="relative w-full max-w-md space-y-4 rounded-2xl border border-white/[0.06] bg-bg-secondary/95 p-6 shadow-2xl shadow-black/50 backdrop-blur-lg animate-dialog-in">
+      <div className="relative w-full max-w-md space-y-4 rounded-2xl border border-overlay-6 bg-bg-secondary/95 p-6 shadow-2xl shadow-black/50 backdrop-blur-lg animate-dialog-in">
         <h3 className="text-lg font-semibold">{title}</h3>
         {description && (
           <p className="whitespace-pre-line text-sm text-text-secondary">{description}</p>
@@ -88,7 +88,7 @@ export default function PromptDialog({
         <div className="flex justify-end gap-2.5 pt-2">
           <button
             onClick={onCancel}
-            className="rounded-xl border border-white/[0.06] bg-bg-tertiary/60 px-4 py-2 text-sm text-text-secondary transition-colors hover:bg-bg-tertiary hover:text-text"
+            className="rounded-xl border border-overlay-6 bg-bg-tertiary/60 px-4 py-2 text-sm text-text-secondary transition-colors hover:bg-bg-tertiary hover:text-text"
           >
             {cancelLabel}
           </button>

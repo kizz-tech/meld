@@ -143,7 +143,7 @@ function ChatView({
                         text: prompt,
                       })
                     }
-                    className="w-full rounded-[24px] border border-white/5 bg-white/[0.02] px-6 py-4.5 text-left text-[14px] text-text-secondary transition-all duration-[240ms] hover:border-white/10 hover:bg-white/[0.06] hover:text-text hover:shadow-[0_8px_24px_rgba(0,0,0,0.2)]"
+                    className="w-full rounded-[24px] border border-overlay-5 bg-overlay-2 px-6 py-4.5 text-left text-[14px] text-text-secondary transition-all duration-[240ms] hover:border-overlay-10 hover:bg-overlay-6 hover:text-text hover:shadow-[0_8px_24px_rgba(0,0,0,0.2)]"
                   >
                     {prompt}
                   </button>
