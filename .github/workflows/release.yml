@@ -55,16 +55,12 @@ jobs:
         include:
           - platform: ubuntu-22.04
             args: ""
-            sig_key: linux
           - platform: macos-latest
             args: --target aarch64-apple-darwin
-            sig_key: macos-arm64
           - platform: macos-latest
             args: --target x86_64-apple-darwin
-            sig_key: macos-x64
           - platform: windows-latest
             args: ""
-            sig_key: windows
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -105,78 +101,23 @@ jobs:
           updaterJsonKeepUniversal: true
           args: ${{ matrix.args }}
 
-      # tauri-action generates .sig files locally but does not upload them
-      # as release assets. Collect the updater bundle signature file.
-      - name: Collect updater signature
-        shell: bash
-        run: |
-          mkdir -p sig-out
-
-          echo "=== All .sig files in target ==="
-          find src-tauri/target -name "*.sig" -type f 2>/dev/null || echo "(none found)"
-
-          # Copy the correct updater sig based on platform
-          case "${{ matrix.sig_key }}" in
-            macos-*)
-              # macOS: target/{arch}/release/bundle/macos/meld.app.tar.gz.sig
-              for f in src-tauri/target/*/release/bundle/macos/*.app.tar.gz.sig; do
-                if [ -f "$f" ]; then
-                  echo "Found macOS sig: $f"
-                  cp "$f" sig-out/updater.sig
-                  break
-                fi
-              done
-              ;;
-            linux)
-              # Linux: target/release/bundle/appimage/meld_*_amd64.AppImage.sig
-              for f in src-tauri/target/release/bundle/appimage/*.AppImage.sig; do
-                if [ -f "$f" ] && [[ "$f" != *.tar.gz.sig ]]; then
-                  echo "Found Linux sig: $f"
-                  cp "$f" sig-out/updater.sig
-                  break
-                fi
-              done
-              ;;
-            windows)
-              # Windows: target/release/bundle/nsis/meld_*_x64-setup.exe.sig
-              for f in src-tauri/target/release/bundle/nsis/*-setup.exe.sig; do
-                if [ -f "$f" ]; then
-                  echo "Found Windows sig: $f"
-                  cp "$f" sig-out/updater.sig
-                  break
-                fi
-              done
-              ;;
-          esac
-
-          if [ -f sig-out/updater.sig ]; then
-            echo "=== Updater signature (${{ matrix.sig_key }}) ==="
-            cat sig-out/updater.sig
-          else
-            echo "ERROR: No updater signature found for ${{ matrix.sig_key }}"
-            echo "This means TAURI_SIGNING_PRIVATE_KEY may not be set or the bundle path changed."
-            exit 1
-          fi
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: sig-${{ matrix.sig_key }}
-          path: sig-out/updater.sig
-          if-no-files-found: warn
-
-  # Rename to stable names, generate latest.json with signatures, publish
+  # Rename to stable names, sign updater bundles, generate latest.json, publish
   finalize:
     needs: build
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/setup-node@v4
         with:
-          pattern: sig-*
-          path: sigs
+          node-version: 22
+
+      - name: Install Tauri CLI for signing
+        run: npm install -g @tauri-apps/cli@^2
 
       - name: Finalize release assets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
@@ -222,29 +163,48 @@ jobs:
             gh release delete-asset "$TAG" "$original" --repo "$REPO" --yes 2>/dev/null || true
           done
 
-          # Also delete any tauri-generated latest.json or stale sig files
+          # Delete any tauri-generated latest.json
           gh release delete-asset "$TAG" "latest.json" --repo "$REPO" --yes 2>/dev/null || true
 
-          # --- Read updater signatures from collected artifacts ---
-          read_sig() {
-            local sig_file="sigs/sig-$1/updater.sig"
-            if [ -f "$sig_file" ]; then
-              cat "$sig_file"
-            else
-              echo "WARNING: No signature for $1" >&2
-              echo ""
+          # --- Sign updater bundles with Tauri signer ---
+          # tauri-action generates .sig files during build but cleans them up.
+          # We re-sign the downloaded bundles here with the same key.
+          sign_bundle() {
+            local file="$1"
+            if [ -f "$file" ]; then
+              echo "Signing: $file"
+              tauri signer sign -k "$TAURI_SIGNING_PRIVATE_KEY" -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "$file"
+              if [ -f "${file}.sig" ]; then
+                echo "Signature: $(cat "${file}.sig" | head -c 80)..."
+              else
+                echo "ERROR: Signature file not created for $file"
+                exit 1
+              fi
             fi
           }
 
-          echo "=== Collected signatures ==="
-          find sigs/ -name "updater.sig" -exec echo {} \; -exec cat {} \; -exec echo \; 2>/dev/null || echo "No sigs found"
+          sign_bundle "assets/meld-macos-arm64.app.tar.gz"
+          sign_bundle "assets/meld-macos-x64.app.tar.gz"
+          sign_bundle "assets/meld-linux-amd64.AppImage"
+          sign_bundle "assets/meld-windows-x64-setup.exe"
+
+          # --- Read signatures ---
+          read_sig() {
+            local sig_file="assets/$1.sig"
+            if [ -f "$sig_file" ]; then
+              cat "$sig_file"
+            else
+              echo "ERROR: Missing signature file: $sig_file" >&2
+              exit 1
+            fi
+          }
 
           PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-          MAC_ARM_SIG=$(read_sig "macos-arm64")
-          MAC_X64_SIG=$(read_sig "macos-x64")
-          LINUX_SIG=$(read_sig "linux")
-          WIN_SIG=$(read_sig "windows")
+          MAC_ARM_SIG=$(read_sig "meld-macos-arm64.app.tar.gz")
+          MAC_X64_SIG=$(read_sig "meld-macos-x64.app.tar.gz")
+          LINUX_SIG=$(read_sig "meld-linux-amd64.AppImage")
+          WIN_SIG=$(read_sig "meld-windows-x64-setup.exe")
 
           # Build latest.json with jq
           LATEST=$(jq -n \
@@ -274,7 +234,7 @@ jobs:
           echo "=== latest.json ==="
           cat assets/latest.json
 
-          # Verify signatures are non-empty
+          # Verify all signatures are non-empty
           for platform in darwin-aarch64 darwin-x86_64 linux-x86_64 windows-x86_64; do
             sig=$(echo "$LATEST" | jq -r ".platforms.\"$platform\".signature")
             if [ -z "$sig" ] || [ "$sig" = "null" ]; then
@@ -282,11 +242,13 @@ jobs:
               exit 1
             fi
           done
-          echo "=== All signatures present ==="
+          echo "=== All signatures verified ==="
 
-          # --- Upload stable-named files + latest.json ---
+          # --- Upload stable-named files + latest.json (skip .sig files) ---
           for f in assets/*; do
             base=$(basename "$f")
+            # Don't upload .sig files as separate assets
+            case "$base" in *.sig) continue ;; esac
             echo "Uploading: $base"
             gh release upload "$TAG" "$f" --repo "$REPO" --clobber
           done
