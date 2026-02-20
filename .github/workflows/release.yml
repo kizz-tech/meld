@@ -55,12 +55,16 @@ jobs:
         include:
           - platform: ubuntu-22.04
             args: ""
+            sig_key: linux
           - platform: macos-latest
             args: --target aarch64-apple-darwin
+            sig_key: macos-arm64
           - platform: macos-latest
             args: --target x86_64-apple-darwin
+            sig_key: macos-x64
           - platform: windows-latest
             args: ""
+            sig_key: windows
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -101,11 +105,46 @@ jobs:
           updaterJsonKeepUniversal: true
           args: ${{ matrix.args }}
 
-  # Rename to stable names, generate latest.json, clean up duplicates, publish
+      # tauri-action generates .sig files locally but may not upload them.
+      # Collect the updater bundle signature and pass it to the finalize job.
+      - name: Collect updater signature
+        shell: bash
+        run: |
+          mkdir -p sig-out
+          case "${{ matrix.sig_key }}" in
+            macos-*)
+              find src-tauri/target -path "*/bundle/macos/*.app.tar.gz.sig" -exec cp {} sig-out/updater.sig \;
+              ;;
+            linux)
+              find src-tauri/target -path "*/bundle/appimage/*.AppImage.sig" ! -path "*.tar.gz.sig" -exec cp {} sig-out/updater.sig \;
+              ;;
+            windows)
+              find src-tauri/target -path "*/bundle/nsis/*-setup.exe.sig" -exec cp {} sig-out/updater.sig \;
+              ;;
+          esac
+          if [ -f sig-out/updater.sig ]; then
+            echo "=== Updater signature (${{ matrix.sig_key }}) ==="
+            cat sig-out/updater.sig
+          else
+            echo "WARNING: No updater signature found for ${{ matrix.sig_key }}"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sig-${{ matrix.sig_key }}
+          path: sig-out/updater.sig
+          if-no-files-found: warn
+
+  # Rename to stable names, generate latest.json with signatures, publish
   finalize:
     needs: build
     runs-on: ubuntu-22.04
     steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sig-*
+          path: sigs
+
       - name: Finalize release assets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -138,12 +177,6 @@ jobs:
               meld_*_amd64.deb)           stable="meld-linux-amd64.deb" ;;
               meld_*_amd64.AppImage)      stable="meld-linux-amd64.AppImage" ;;
               meld-*-1.x86_64.rpm)        stable="meld-linux-x86_64.rpm" ;;
-              # Signature files
-              meld_aarch64.app.tar.gz.sig)  stable="meld-macos-arm64.app.tar.gz.sig" ;;
-              meld_x64.app.tar.gz.sig)      stable="meld-macos-x64.app.tar.gz.sig" ;;
-              meld_*_amd64.AppImage.sig)    stable="meld-linux-amd64.AppImage.sig" ;;
-              meld_*_x64-setup.exe.sig)     stable="meld-windows-x64-setup.exe.sig" ;;
-              meld_*_x64_en-US.msi.sig)     stable="meld-windows-x64.msi.sig" ;;
             esac
             if [ -n "$stable" ]; then
               RENAME_MAP["$base"]="$stable"
@@ -160,25 +193,29 @@ jobs:
             gh release delete-asset "$TAG" "$original" --repo "$REPO" --yes 2>/dev/null || true
           done
 
-          # Also delete the tauri-generated latest.json (we'll generate our own)
+          # Also delete any tauri-generated latest.json or stale sig files
           gh release delete-asset "$TAG" "latest.json" --repo "$REPO" --yes 2>/dev/null || true
 
-          # --- Generate latest.json for Tauri updater ---
+          # --- Read updater signatures from collected artifacts ---
           read_sig() {
-            local sig_file="assets/$1"
+            local sig_file="sigs/sig-$1/updater.sig"
             if [ -f "$sig_file" ]; then
               cat "$sig_file"
             else
+              echo "WARNING: No signature for $1" >&2
               echo ""
             fi
           }
 
+          echo "=== Collected signatures ==="
+          find sigs/ -name "updater.sig" -exec echo {} \; -exec cat {} \; -exec echo \; 2>/dev/null || echo "No sigs found"
+
           PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-          MAC_ARM_SIG=$(read_sig "meld-macos-arm64.app.tar.gz.sig")
-          MAC_X64_SIG=$(read_sig "meld-macos-x64.app.tar.gz.sig")
-          LINUX_SIG=$(read_sig "meld-linux-amd64.AppImage.sig")
-          WIN_SIG=$(read_sig "meld-windows-x64-setup.exe.sig")
+          MAC_ARM_SIG=$(read_sig "macos-arm64")
+          MAC_X64_SIG=$(read_sig "macos-x64")
+          LINUX_SIG=$(read_sig "linux")
+          WIN_SIG=$(read_sig "windows")
 
           # Build latest.json with jq
           LATEST=$(jq -n \
@@ -208,10 +245,19 @@ jobs:
           echo "=== latest.json ==="
           cat assets/latest.json
 
+          # Verify signatures are non-empty
+          for platform in darwin-aarch64 darwin-x86_64 linux-x86_64 windows-x86_64; do
+            sig=$(echo "$LATEST" | jq -r ".platforms.\"$platform\".signature")
+            if [ -z "$sig" ] || [ "$sig" = "null" ]; then
+              echo "ERROR: Empty signature for $platform"
+              exit 1
+            fi
+          done
+          echo "=== All signatures present ==="
+
           # --- Upload stable-named files + latest.json ---
           for f in assets/*; do
             base=$(basename "$f")
-            # Skip any remaining versioned files we didn't map
             echo "Uploading: $base"
             gh release upload "$TAG" "$f" --repo "$REPO" --clobber
           done
