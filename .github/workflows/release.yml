@@ -105,28 +105,57 @@ jobs:
           updaterJsonKeepUniversal: true
           args: ${{ matrix.args }}
 
-      # tauri-action generates .sig files locally but may not upload them.
-      # Collect the updater bundle signature and pass it to the finalize job.
+      # tauri-action generates .sig files locally but does not upload them
+      # as release assets. Collect the updater bundle signature file.
       - name: Collect updater signature
         shell: bash
         run: |
           mkdir -p sig-out
+
+          echo "=== All .sig files in target ==="
+          find src-tauri/target -name "*.sig" -type f 2>/dev/null || echo "(none found)"
+
+          # Copy the correct updater sig based on platform
           case "${{ matrix.sig_key }}" in
             macos-*)
-              find src-tauri/target -path "*/bundle/macos/*.app.tar.gz.sig" -exec cp {} sig-out/updater.sig \;
+              # macOS: target/{arch}/release/bundle/macos/meld.app.tar.gz.sig
+              for f in src-tauri/target/*/release/bundle/macos/*.app.tar.gz.sig; do
+                if [ -f "$f" ]; then
+                  echo "Found macOS sig: $f"
+                  cp "$f" sig-out/updater.sig
+                  break
+                fi
+              done
               ;;
             linux)
-              find src-tauri/target -path "*/bundle/appimage/*.AppImage.sig" ! -path "*.tar.gz.sig" -exec cp {} sig-out/updater.sig \;
+              # Linux: target/release/bundle/appimage/meld_*_amd64.AppImage.sig
+              for f in src-tauri/target/release/bundle/appimage/*.AppImage.sig; do
+                if [ -f "$f" ] && [[ "$f" != *.tar.gz.sig ]]; then
+                  echo "Found Linux sig: $f"
+                  cp "$f" sig-out/updater.sig
+                  break
+                fi
+              done
               ;;
             windows)
-              find src-tauri/target -path "*/bundle/nsis/*-setup.exe.sig" -exec cp {} sig-out/updater.sig \;
+              # Windows: target/release/bundle/nsis/meld_*_x64-setup.exe.sig
+              for f in src-tauri/target/release/bundle/nsis/*-setup.exe.sig; do
+                if [ -f "$f" ]; then
+                  echo "Found Windows sig: $f"
+                  cp "$f" sig-out/updater.sig
+                  break
+                fi
+              done
               ;;
           esac
+
           if [ -f sig-out/updater.sig ]; then
             echo "=== Updater signature (${{ matrix.sig_key }}) ==="
             cat sig-out/updater.sig
           else
-            echo "WARNING: No updater signature found for ${{ matrix.sig_key }}"
+            echo "ERROR: No updater signature found for ${{ matrix.sig_key }}"
+            echo "This means TAURI_SIGNING_PRIVATE_KEY may not be set or the bundle path changed."
+            exit 1
           fi
 
       - uses: actions/upload-artifact@v4
