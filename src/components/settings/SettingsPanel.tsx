@@ -256,7 +256,7 @@ export default function SettingsPanel() {
                 }
               }
             }}
-            className="text-xs px-3 py-1.5 bg-bg-tertiary/80 rounded-lg hover:bg-border transition-colors"
+            className="text-xs px-3.5 py-2 border border-white/[0.06] bg-bg-tertiary/60 rounded-xl hover:bg-bg-tertiary hover:border-white/10 transition-colors"
           >
             Change vault
           </button>
@@ -447,7 +447,7 @@ export default function SettingsPanel() {
                 onClick={() =>
                   handleSaveKey(provider, apiKeys[provider] ?? "")
                 }
-                className="px-2.5 text-xs bg-bg-tertiary/80 rounded-lg hover:bg-border transition-colors"
+                className="px-3 text-xs border border-white/[0.06] bg-bg-tertiary/60 rounded-xl hover:bg-bg-tertiary hover:border-white/10 transition-colors"
               >
                 Save
               </button>
@@ -465,7 +465,7 @@ export default function SettingsPanel() {
           {updateStatus === "idle" && (
             <button
               onClick={handleCheckUpdate}
-              className="text-xs px-3 py-1.5 bg-bg-tertiary/80 rounded-lg hover:bg-border transition-colors"
+              className="text-xs px-3.5 py-2 border border-white/[0.06] bg-bg-tertiary/60 rounded-xl hover:bg-bg-tertiary hover:border-white/10 transition-colors"
             >
               Check for updates
             </button>
@@ -483,7 +483,7 @@ export default function SettingsPanel() {
               </p>
               <button
                 onClick={handleInstallUpdate}
-                className="text-xs px-3 py-1.5 bg-bg-tertiary/80 rounded-lg hover:bg-border transition-colors"
+                className="text-xs px-3.5 py-2 border border-white/[0.06] bg-bg-tertiary/60 rounded-xl hover:bg-bg-tertiary hover:border-white/10 transition-colors"
               >
                 Download &amp; install
               </button>
@@ -499,7 +499,7 @@ export default function SettingsPanel() {
               <p className="text-xs text-error">{updateError}</p>
               <button
                 onClick={handleCheckUpdate}
-                className="text-xs px-3 py-1.5 bg-bg-tertiary/80 rounded-lg hover:bg-border transition-colors"
+                className="text-xs px-3.5 py-2 border border-white/[0.06] bg-bg-tertiary/60 rounded-xl hover:bg-bg-tertiary hover:border-white/10 transition-colors"
               >
                 Retry
               </button>

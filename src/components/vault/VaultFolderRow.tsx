@@ -32,7 +32,7 @@ export interface VaultFolderRowProps {
 }
 
 const kbRowBaseClass =
-  "group flex w-full min-w-0 items-center rounded-lg px-2.5 py-2 text-left text-[13px] transition-all duration-[120ms]";
+  "group flex w-full min-w-0 items-center rounded-xl px-2.5 py-2 text-left text-[13px] transition-all duration-[120ms]";
 const kbRowIdleClass =
   "text-text-secondary hover:bg-bg-tertiary/50 hover:text-text";
 const kbRowDropClass =

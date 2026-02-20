@@ -55,22 +55,22 @@ export default function ConfirmDialog({
         onClick={onCancel}
       />
 
-      <div className="relative w-full max-w-sm rounded-2xl bg-bg-secondary/98 p-5 shadow-xl shadow-black/30 backdrop-blur-lg space-y-4 animate-dialog-in">
+      <div className="relative w-full max-w-sm rounded-2xl border border-white/[0.06] bg-bg-secondary/98 p-6 shadow-xl shadow-black/30 backdrop-blur-lg space-y-4 animate-dialog-in">
         <h3 className="text-lg font-semibold">{title}</h3>
         {description && (
           <p className="text-sm text-text-secondary whitespace-pre-line">{description}</p>
         )}
 
-        <div className="flex justify-end gap-2 pt-1">
+        <div className="flex justify-end gap-2.5 pt-2">
           <button
             onClick={onCancel}
-            className="px-3 py-1.5 text-sm rounded-md bg-bg-tertiary text-text-secondary hover:text-text hover:bg-border transition-colors"
+            className="px-4 py-2 text-sm rounded-xl border border-white/[0.06] bg-bg-tertiary/60 text-text-secondary hover:text-text hover:bg-bg-tertiary transition-colors"
           >
             {cancelLabel}
           </button>
           <button
             onClick={onConfirm}
-            className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+            className={`px-4 py-2 text-sm rounded-xl transition-colors ${
               destructive
                 ? "bg-error/20 text-error hover:bg-error/30"
                 : "bg-accent text-bg hover:opacity-90"

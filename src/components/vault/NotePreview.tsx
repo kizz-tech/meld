@@ -136,7 +136,7 @@ function MarkdownCodeBlock({
           onClick={() => {
             void handleCopy();
           }}
-          className="flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-text-muted transition-colors hover:border-border/30 hover:bg-bg-tertiary/50 hover:text-text focus-visible:border-border-focus focus-visible:shadow-[0_0_0_1px_var(--color-border-focus)] outline-none"
+          className="flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-text-muted transition-colors hover:border-border/30 hover:bg-bg-tertiary/50 hover:text-text focus-visible:border-border-focus focus-visible:shadow-[0_0_0_1px_var(--color-border-focus)] outline-none"
           title={copied ? "Copied" : "Copy code"}
           aria-label={copied ? "Copied" : "Copy code"}
         >
@@ -170,7 +170,7 @@ function ToolbarIconButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-text-muted transition-colors hover:border-border/30 hover:bg-bg-tertiary/50 hover:text-text focus-visible:border-border-focus focus-visible:shadow-[0_0_0_1px_var(--color-border-focus)] outline-none disabled:cursor-not-allowed disabled:opacity-40"
+      className="flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-text-muted transition-colors hover:border-border/30 hover:bg-bg-tertiary/50 hover:text-text focus-visible:border-border-focus focus-visible:shadow-[0_0_0_1px_var(--color-border-focus)] outline-none disabled:cursor-not-allowed disabled:opacity-40"
       title={label}
       aria-label={label}
     >

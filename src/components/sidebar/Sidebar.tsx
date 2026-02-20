@@ -12,6 +12,8 @@ import { useShallow } from "zustand/react/shallow";
 import { save } from "@tauri-apps/plugin-dialog";
 import { useAppStore, type Conversation } from "@/lib/store";
 import { exportConversation } from "@/lib/tauri";
+import { ChevronsLeft, ChevronsRight } from "lucide-react";
+import WindowControls from "@/components/ui/WindowControls";
 import type { VaultEntry } from "@/lib/tauri";
 import VaultBrowser from "@/components/vault/VaultBrowser";
 import TreeSurface from "@/components/tree/TreeSurface";
@@ -195,24 +197,24 @@ const loadChatLayoutSnapshot = (): ChatLayoutSnapshot => {
 
     const folders = Array.isArray(parsed.folders)
       ? parsed.folders
-          .filter((item): item is ChatFolder => {
-            if (!item || typeof item !== "object") return false;
-            const candidate = item as Partial<ChatFolder>;
-            return (
-              typeof candidate.id === "string" &&
-              typeof candidate.name === "string" &&
-              (candidate.parentId === null || typeof candidate.parentId === "string")
-            );
-          })
-          .map((item) => ({
-            id: item.id,
-            name: item.name.trim() || "Untitled folder",
-            parentId: item.parentId,
-            pinned: Boolean(item.pinned),
-            archived: Boolean(item.archived),
-            createdAt: item.createdAt || nowIso(),
-            updatedAt: item.updatedAt || item.createdAt || nowIso(),
-          }))
+        .filter((item): item is ChatFolder => {
+          if (!item || typeof item !== "object") return false;
+          const candidate = item as Partial<ChatFolder>;
+          return (
+            typeof candidate.id === "string" &&
+            typeof candidate.name === "string" &&
+            (candidate.parentId === null || typeof candidate.parentId === "string")
+          );
+        })
+        .map((item) => ({
+          id: item.id,
+          name: item.name.trim() || "Untitled folder",
+          parentId: item.parentId,
+          pinned: Boolean(item.pinned),
+          archived: Boolean(item.archived),
+          createdAt: item.createdAt || nowIso(),
+          updatedAt: item.updatedAt || item.createdAt || nowIso(),
+        }))
       : [];
 
     const assignments: Record<string, string> = Object.create(null);
@@ -574,10 +576,10 @@ export default function Sidebar({
         prev.map((item) =>
           item.id === folder.id
             ? {
-                ...item,
-                name: nextName,
-                updatedAt: nowIso(),
-              }
+              ...item,
+              name: nextName,
+              updatedAt: nowIso(),
+            }
             : item,
         ),
       );
@@ -692,9 +694,9 @@ export default function Sidebar({
       prev.map((folder) =>
         folder.id === folderId
           ? {
-              ...folder,
-              updatedAt: nowIso(),
-            }
+            ...folder,
+            updatedAt: nowIso(),
+          }
           : folder,
       ),
     );
@@ -768,10 +770,10 @@ export default function Sidebar({
         prev.map((folder) =>
           folder.id === entity.id
             ? {
-                ...folder,
-                parentId: targetFolderId,
-                updatedAt: nowIso(),
-              }
+              ...folder,
+              parentId: targetFolderId,
+              updatedAt: nowIso(),
+            }
             : folder,
         ),
       ),
@@ -802,10 +804,10 @@ export default function Sidebar({
         prev.map((folder) =>
           folder.id === entity.id
             ? {
-                ...folder,
-                parentId: null,
-                updatedAt: nowIso(),
-              }
+              ...folder,
+              parentId: null,
+              updatedAt: nowIso(),
+            }
             : folder,
         ),
       ),
@@ -832,10 +834,10 @@ export default function Sidebar({
         prev.map((candidate) =>
           candidate.id === folder.id
             ? {
-                ...candidate,
-                pinned: !candidate.pinned,
-                updatedAt: nowIso(),
-              }
+              ...candidate,
+              pinned: !candidate.pinned,
+              updatedAt: nowIso(),
+            }
             : candidate,
         ),
       ),
@@ -850,11 +852,11 @@ export default function Sidebar({
       prev.map((candidate) =>
         descendants.has(candidate.id)
           ? {
-              ...candidate,
-              archived: true,
-              pinned: false,
-              updatedAt: nowIso(),
-            }
+            ...candidate,
+            archived: true,
+            pinned: false,
+            updatedAt: nowIso(),
+          }
           : candidate,
       ),
     );
@@ -1057,8 +1059,8 @@ export default function Sidebar({
   const selectedMenuConversation =
     contextMenu?.target.kind === "conversation"
       ? conversations.find((conversation) =>
-          sameConversation(conversation.id, contextMenu.target.id),
-        )
+        sameConversation(conversation.id, contextMenu.target.id),
+      )
       : null;
 
   const selectedMenuFolder =
@@ -1070,220 +1072,225 @@ export default function Sidebar({
   const contextMenuNode =
     contextMenu && typeof document !== "undefined"
       ? createPortal(
-          <div
-            data-sidebar-context-menu
-            role="menu"
-            className="animate-fade-in fixed z-[220] min-w-[188px] rounded-lg border border-border/70 bg-bg-secondary/95 p-1 shadow-lg shadow-black/25 backdrop-blur-md"
-            style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
-          >
-            {selectedMenuConversation && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => beginRenameConversation(selectedMenuConversation)}
-                  className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
-                >
-                  <span>Rename</span>
-                  <span>✎</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const conv = selectedMenuConversation;
-                    setContextMenu(null);
-                    void (async () => {
-                      const filePath = await save({
-                        defaultPath: `${conv.title || "conversation"}.md`,
-                        filters: [{ name: "Markdown", extensions: ["md"] }],
-                      });
-                      if (filePath) {
-                        await exportConversation(conv.id, filePath, conv.title);
-                      }
-                    })();
-                  }}
-                  className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
-                >
-                  <span>Export</span>
-                  <span>↗</span>
-                </button>
-                {selectedMenuConversation.archived ? (
-                  <>
+        <div
+          data-sidebar-context-menu
+          role="menu"
+          className="animate-fade-in fixed z-[220] min-w-[188px] rounded-2xl border border-border/70 bg-bg-secondary/95 p-1.5 shadow-lg shadow-black/25 backdrop-blur-md"
+          style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
+        >
+          {selectedMenuConversation && (
+            <>
+              <button
+                type="button"
+                onClick={() => beginRenameConversation(selectedMenuConversation)}
+                className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
+              >
+                <span>Rename</span>
+                <span>✎</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const conv = selectedMenuConversation;
+                  setContextMenu(null);
+                  void (async () => {
+                    const filePath = await save({
+                      defaultPath: `${conv.title || "conversation"}.md`,
+                      filters: [{ name: "Markdown", extensions: ["md"] }],
+                    });
+                    if (filePath) {
+                      await exportConversation(conv.id, filePath, conv.title);
+                    }
+                  })();
+                }}
+                className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
+              >
+                <span>Export</span>
+                <span>↗</span>
+              </button>
+              {selectedMenuConversation.archived ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void unarchiveConversationRow(selectedMenuConversation);
+                    }}
+                    className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
+                  >
+                    <span>Unarchive</span>
+                    <span>↶</span>
+                  </button>
+                </>
+              ) : (
+                <>
+                  {selectedMenuConversation.pinned ? (
                     <button
                       type="button"
                       onClick={() => {
-                        void unarchiveConversationRow(selectedMenuConversation);
+                        void unpinConversationRow(selectedMenuConversation);
                       }}
-                      className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
+                      className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
                     >
-                      <span>Unarchive</span>
-                      <span>↶</span>
+                      <span>Unpin</span>
+                      <span>⌁</span>
                     </button>
-                  </>
-                ) : (
-                  <>
-                    {selectedMenuConversation.pinned ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          void unpinConversationRow(selectedMenuConversation);
-                        }}
-                        className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
-                      >
-                        <span>Unpin</span>
-                        <span>⌁</span>
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          void pinConversationRow(selectedMenuConversation);
-                        }}
-                        className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
-                      >
-                        <span>Pin</span>
-                        <span>⌁</span>
-                      </button>
-                    )}
-                    {conversationFolders[String(selectedMenuConversation.id)] && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setContextMenu(null);
-                          setConversationFolder(selectedMenuConversation.id, null);
-                          persistConversationOrder(String(selectedMenuConversation.id));
-                        }}
-                        className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
-                      >
-                        <span>Move to root</span>
-                        <span>↤</span>
-                      </button>
-                    )}
+                  ) : (
                     <button
                       type="button"
                       onClick={() => {
-                        void archiveConversationRow(selectedMenuConversation);
+                        void pinConversationRow(selectedMenuConversation);
                       }}
-                      className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs text-error transition-colors hover:bg-error/10"
+                      className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
                     >
-                      <span>Archive</span>
-                      <span>↧</span>
+                      <span>Pin</span>
+                      <span>⌁</span>
                     </button>
-                  </>
-                )}
-              </>
-            )}
+                  )}
+                  {conversationFolders[String(selectedMenuConversation.id)] && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setContextMenu(null);
+                        setConversationFolder(selectedMenuConversation.id, null);
+                        persistConversationOrder(String(selectedMenuConversation.id));
+                      }}
+                      className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
+                    >
+                      <span>Move to root</span>
+                      <span>↤</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void archiveConversationRow(selectedMenuConversation);
+                    }}
+                    className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs text-error transition-colors hover:bg-error/10"
+                  >
+                    <span>Archive</span>
+                    <span>↧</span>
+                  </button>
+                </>
+              )}
+            </>
+          )}
 
-            {selectedMenuFolder && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => startNewChat(selectedMenuFolder.id)}
-                  className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
-                >
-                  <span>New chat</span>
-                  <span>＋</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setContextMenu(null);
-                    createFolder(selectedMenuFolder.id);
-                  }}
-                  className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
-                >
-                  <span>New folder</span>
-                  <span>＋</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => beginRenameFolder(selectedMenuFolder)}
-                  className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
-                >
-                  <span>Rename</span>
-                  <span>✎</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => toggleFolderPin(selectedMenuFolder)}
-                  className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
-                >
-                  <span>{selectedMenuFolder.pinned ? "Unpin" : "Pin"}</span>
-                  <span>⌁</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => archiveFolder(selectedMenuFolder)}
-                  className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs text-error transition-colors hover:bg-error/10"
-                >
-                  <span>Archive folder</span>
-                  <span>↧</span>
-                </button>
-              </>
-            )}
+          {selectedMenuFolder && (
+            <>
+              <button
+                type="button"
+                onClick={() => startNewChat(selectedMenuFolder.id)}
+                className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
+              >
+                <span>New chat</span>
+                <span>＋</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setContextMenu(null);
+                  createFolder(selectedMenuFolder.id);
+                }}
+                className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
+              >
+                <span>New folder</span>
+                <span>＋</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => beginRenameFolder(selectedMenuFolder)}
+                className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
+              >
+                <span>Rename</span>
+                <span>✎</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => toggleFolderPin(selectedMenuFolder)}
+                className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
+              >
+                <span>{selectedMenuFolder.pinned ? "Unpin" : "Pin"}</span>
+                <span>⌁</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => archiveFolder(selectedMenuFolder)}
+                className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs text-error transition-colors hover:bg-error/10"
+              >
+                <span>Archive folder</span>
+                <span>↧</span>
+              </button>
+            </>
+          )}
 
-            {selectedMenuRoot && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => startNewChat(null)}
-                  className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
-                >
-                  <span>New chat</span>
-                  <span>＋</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setContextMenu(null);
-                    createFolder(null);
-                  }}
-                  className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
-                >
-                  <span>New folder</span>
-                  <span>＋</span>
-                </button>
-              </>
-            )}
-          </div>,
-          document.body,
-        )
+          {selectedMenuRoot && (
+            <>
+              <button
+                type="button"
+                onClick={() => startNewChat(null)}
+                className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
+              >
+                <span>New chat</span>
+                <span>＋</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setContextMenu(null);
+                  createFolder(null);
+                }}
+                className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
+              >
+                <span>New folder</span>
+                <span>＋</span>
+              </button>
+            </>
+          )}
+        </div>,
+        document.body,
+      )
       : null;
 
   return (
     <>
       <aside
-        className={`h-full shrink-0 bg-bg-secondary/40 transition-[width] duration-[180ms] ease-out ${
-          sidebarCollapsed ? "w-14" : "w-[248px]"
-        }`}
+        className={`h-full shrink-0 bg-transparent transition-[width] duration-[180ms] ease-out ${sidebarCollapsed ? "w-14" : "w-[248px]"
+          }`}
       >
         <div className="flex h-full flex-col">
+          {/* OS Window Controls - Traffic Lights for Mac */}
+          <div className="relative flex items-center min-h-[44px]">
+            <div data-tauri-drag-region className="absolute inset-0" />
+            <div className="relative z-10">
+              <WindowControls placement="left" />
+            </div>
+          </div>
+
           {/* Tab switcher — floating */}
           <div className="relative z-[1] px-3 pt-3 pb-3">
             {!sidebarCollapsed && (
-              <div className="relative grid grid-cols-2 rounded-2xl border border-border/25 bg-bg-secondary/80 p-1 shadow-lg shadow-black/30 backdrop-blur-md">
+              <div className="relative grid grid-cols-2 rounded-[20px] border border-white/[0.06] bg-white/[0.03] p-1.5">
                 <div
-                  className="absolute top-1 bottom-1 w-[calc(50%-4px)] rounded-xl bg-bg-tertiary/90 shadow-sm shadow-black/20 transition-transform duration-200 ease-out"
-                  style={{ transform: viewMode === "files" ? "translateX(calc(100% + 8px))" : "translateX(0)" }}
+                  className="absolute left-1.5 top-1.5 bottom-1.5 w-[calc(50%-6px)] rounded-[14px] bg-white/[0.08] transition-transform duration-200 ease-out"
+                  style={{ transform: viewMode === "files" ? "translateX(100%)" : "translateX(0)" }}
                 />
                 <button
                   type="button"
                   onClick={() => setViewMode("chats")}
-                  className={`relative z-[1] rounded-xl px-2 py-1.5 text-xs font-medium transition-colors duration-200 ${
-                    viewMode === "chats"
-                      ? "text-text"
-                      : "text-text-muted hover:text-text-secondary"
-                  }`}
+                  className={`relative z-[1] rounded-[14px] px-2.5 py-2 text-xs font-medium transition-colors duration-200 ${viewMode === "chats"
+                    ? "text-text"
+                    : "text-text-muted hover:text-text-secondary"
+                    }`}
                 >
                   Chats
                 </button>
                 <button
                   type="button"
                   onClick={() => setViewMode("files")}
-                  className={`relative z-[1] rounded-xl px-2 py-1.5 text-xs font-medium transition-colors duration-200 ${
-                    viewMode === "files"
-                      ? "text-text"
-                      : "text-text-muted hover:text-text-secondary"
-                  }`}
+                  className={`relative z-[1] rounded-[14px] px-2.5 py-2 text-xs font-medium transition-colors duration-200 ${viewMode === "files"
+                    ? "text-text"
+                    : "text-text-muted hover:text-text-secondary"
+                    }`}
                 >
                   Knowledge
                 </button>
@@ -1291,19 +1298,18 @@ export default function Sidebar({
             )}
 
             {sidebarCollapsed && (
-              <div className="relative flex flex-col gap-0.5 rounded-2xl border border-border/25 bg-bg-secondary/80 p-1 shadow-lg shadow-black/30 backdrop-blur-md">
+              <div className="relative flex flex-col gap-0.5 rounded-[20px] border border-white/[0.06] bg-white/[0.03] p-1.5">
                 <div
-                  className="absolute left-1 right-1 h-[calc(50%-3px)] rounded-xl bg-bg-tertiary/90 shadow-sm shadow-black/20 transition-transform duration-200 ease-out"
+                  className="absolute left-1.5 right-1.5 top-1.5 h-[calc(50%-4px)] rounded-[14px] bg-white/[0.08] transition-transform duration-200 ease-out"
                   style={{ transform: viewMode === "files" ? "translateY(calc(100% + 6px))" : "translateY(0)" }}
                 />
                 <button
                   type="button"
                   onClick={() => setViewMode("chats")}
-                  className={`relative z-[1] rounded-xl px-2 py-1.5 text-[11px] font-medium transition-colors duration-200 ${
-                    viewMode === "chats"
-                      ? "text-text"
-                      : "text-text-muted hover:text-text-secondary"
-                  }`}
+                  className={`relative z-[1] rounded-[14px] px-2.5 py-2 text-[11px] font-medium transition-colors duration-200 ${viewMode === "chats"
+                    ? "text-text"
+                    : "text-text-muted hover:text-text-secondary"
+                    }`}
                   title="Chats"
                 >
                   C
@@ -1311,11 +1317,10 @@ export default function Sidebar({
                 <button
                   type="button"
                   onClick={() => setViewMode("files")}
-                  className={`relative z-[1] rounded-xl px-2 py-1.5 text-[11px] font-medium transition-colors duration-200 ${
-                    viewMode === "files"
-                      ? "text-text"
-                      : "text-text-muted hover:text-text-secondary"
-                  }`}
+                  className={`relative z-[1] rounded-[14px] px-2.5 py-2 text-[11px] font-medium transition-colors duration-200 ${viewMode === "files"
+                    ? "text-text"
+                    : "text-text-muted hover:text-text-secondary"
+                    }`}
                   title="Knowledge"
                 >
                   K
@@ -1339,7 +1344,7 @@ export default function Sidebar({
                   <button
                     type="button"
                     onClick={() => startNewChat(null)}
-                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-accent/20 bg-accent/[0.06] px-2 py-2 text-sm text-accent/80 transition-all duration-[120ms] hover:bg-accent/[0.12] hover:text-accent hover:border-accent/30"
+                    className="flex w-full items-center justify-center gap-2 rounded-2xl border border-accent/20 bg-accent/[0.06] px-3 py-2.5 text-sm text-accent/80 transition-all duration-[120ms] hover:bg-accent/[0.12] hover:text-accent hover:border-accent/30"
                     title="New chat"
                   >
                     <span className="text-base leading-none">+</span>
@@ -1349,7 +1354,7 @@ export default function Sidebar({
                     <button
                       type="button"
                       onClick={() => createFolder(null)}
-                      className="flex w-full items-center justify-center gap-2 rounded-xl border border-border/20 bg-bg-tertiary/30 px-2 py-1.5 text-xs text-text-secondary transition-all duration-[120ms] hover:bg-bg-tertiary/60 hover:text-text hover:border-border/40"
+                      className="flex w-full items-center justify-center gap-2 rounded-2xl border border-border/20 bg-bg-tertiary/30 px-3 py-2 text-xs text-text-secondary transition-all duration-[120ms] hover:bg-bg-tertiary/60 hover:text-text hover:border-border/40"
                       title="New folder"
                     >
                       <span className="text-sm leading-none">+</span>
@@ -1421,7 +1426,7 @@ export default function Sidebar({
                                       id: String(conversation.id),
                                     });
                                   }}
-                                  className="group relative flex w-full min-w-0 items-center rounded-lg px-2.5 py-2 text-left text-[13px] transition-all duration-[120ms] text-text-secondary hover:bg-bg-tertiary/50 hover:text-text"
+                                  className="group relative flex w-full min-w-0 items-center rounded-xl px-2.5 py-2 text-left text-[13px] transition-all duration-[120ms] text-text-secondary hover:bg-bg-tertiary/50 hover:text-text"
                                   style={{ paddingLeft: "8px" }}
                                 >
                                   <button
@@ -1466,7 +1471,7 @@ export default function Sidebar({
                   <button
                     type="button"
                     onClick={() => void createRootKnowledgeNote()}
-                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-accent/20 bg-accent/[0.06] px-2 py-2 text-sm text-accent/80 transition-all duration-[120ms] hover:bg-accent/[0.12] hover:text-accent hover:border-accent/30"
+                    className="flex w-full items-center justify-center gap-2 rounded-2xl border border-accent/20 bg-accent/[0.06] px-3 py-2.5 text-sm text-accent/80 transition-all duration-[120ms] hover:bg-accent/[0.12] hover:text-accent hover:border-accent/30"
                     title="New note"
                   >
                     <span className="text-base leading-none">+</span>
@@ -1476,7 +1481,7 @@ export default function Sidebar({
                     <button
                       type="button"
                       onClick={() => void createRootKnowledgeFolder()}
-                      className="flex w-full items-center justify-center gap-2 rounded-xl border border-border/20 bg-bg-tertiary/30 px-2 py-1.5 text-xs text-text-secondary transition-all duration-[120ms] hover:bg-bg-tertiary/60 hover:text-text hover:border-border/40"
+                      className="flex w-full items-center justify-center gap-2 rounded-2xl border border-border/20 bg-bg-tertiary/30 px-3 py-2 text-xs text-text-secondary transition-all duration-[120ms] hover:bg-bg-tertiary/60 hover:text-text hover:border-border/40"
                       title="New folder"
                     >
                       <span className="text-sm leading-none">+</span>
@@ -1502,9 +1507,9 @@ export default function Sidebar({
             </div>
           </div>
 
-          <div className="p-3 pt-3.5">
+          <div className="p-3 pt-3.5 pb-4">
             {!sidebarCollapsed && sidebarError && (
-              <p className="mb-2 rounded-md border border-error/40 bg-error/[0.08] px-2 py-1.5 text-[11px] text-error">
+              <p className="mb-2 rounded-lg border border-error/40 bg-error/[0.08] px-2 py-1.5 text-[11px] text-error">
                 {sidebarError}
               </p>
             )}
@@ -1513,8 +1518,14 @@ export default function Sidebar({
               className="flex w-full items-center justify-center gap-2 rounded-xl px-2 py-1.5 text-sm text-text-muted transition-all duration-[120ms] hover:bg-bg-tertiary/60 hover:text-text-secondary"
               title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
             >
-              <span className="text-xs">{sidebarCollapsed ? ">>" : "<<"}</span>
-              {!sidebarCollapsed && <span>Collapse</span>}
+              {sidebarCollapsed ? (
+                <ChevronsRight className="h-3.5 w-3.5" strokeWidth={1.8} />
+              ) : (
+                <>
+                  <ChevronsLeft className="h-3.5 w-3.5" strokeWidth={1.8} />
+                  <span>Collapse</span>
+                </>
+              )}
             </button>
           </div>
         </div>

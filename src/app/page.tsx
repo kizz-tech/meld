@@ -11,6 +11,7 @@ import HistoryPanel from "@/components/history/HistoryPanel";
 import StatusBar from "@/components/ui/StatusBar";
 import MeldLogo from "@/components/ui/MeldLogo";
 import { useAppStore } from "@/lib/store";
+import WindowControls from "@/components/ui/WindowControls";
 import { History, Settings } from "lucide-react";
 
 export default function Home() {
@@ -61,7 +62,7 @@ export default function Home() {
 
   if (state.loading) {
     return (
-      <div className="flex items-center justify-center h-screen bg-bg">
+      <div className="flex w-full items-center justify-center h-full bg-transparent">
         <div className="w-8 h-8 border-2 border-text-muted border-t-transparent rounded-full animate-spin" />
       </div>
     );
@@ -72,74 +73,78 @@ export default function Home() {
     : state.chatProvider || "—";
 
   return (
-    <div className="relative flex h-screen bg-bg">
-      {/* Sidebar */}
-      <Sidebar
-        conversations={state.conversations}
-        activeConversationId={state.activeConversationId}
-        vaultEntries={state.vaultEntries}
-        loadingVaultFiles={state.loadingVaultFiles}
-        activeNotePath={state.activeNote}
-        onSelectConversation={actions.handleSelectConversation}
-        onSelectNote={actions.handleSelectNote}
-        onNewChat={actions.handleNewChat}
-        onRenameConversation={actions.handleRenameConversation}
-        onReorderConversations={actions.handleReorderConversations}
-        onArchiveConversation={actions.handleArchiveConversation}
-        onUnarchiveConversation={actions.handleUnarchiveConversation}
-        onPinConversation={actions.handlePinConversation}
-        onUnpinConversation={actions.handleUnpinConversation}
-        onCreateKbNote={actions.handleCreateKbNote}
-        onCreateKbFolder={actions.handleCreateKbFolder}
-        onArchiveKbEntry={actions.handleArchiveKbEntry}
-        onMoveKbEntry={actions.handleMoveKbEntry}
-      />
+    <div className="relative flex h-full w-full rounded-[28px] bg-bg border border-white/[0.06] overflow-hidden">
+      {/* Sidebar Wrapper */}
+      <div className="relative flex h-full shrink-0 flex-col border-r border-white/5">
+        <Sidebar
+          conversations={state.conversations}
+          activeConversationId={state.activeConversationId}
+          vaultEntries={state.vaultEntries}
+          loadingVaultFiles={state.loadingVaultFiles}
+          activeNotePath={state.activeNote}
+          onSelectConversation={actions.handleSelectConversation}
+          onSelectNote={actions.handleSelectNote}
+          onNewChat={actions.handleNewChat}
+          onRenameConversation={actions.handleRenameConversation}
+          onReorderConversations={actions.handleReorderConversations}
+          onArchiveConversation={actions.handleArchiveConversation}
+          onUnarchiveConversation={actions.handleUnarchiveConversation}
+          onPinConversation={actions.handlePinConversation}
+          onUnpinConversation={actions.handleUnpinConversation}
+          onCreateKbNote={actions.handleCreateKbNote}
+          onCreateKbFolder={actions.handleCreateKbFolder}
+          onArchiveKbEntry={actions.handleArchiveKbEntry}
+          onMoveKbEntry={actions.handleMoveKbEntry}
+        />
+      </div>
 
-      {/* Main area */}
-      <div className="relative flex min-w-0 flex-1 flex-col">
+      {/* Main area Wrapper */}
+      <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-black/10">
         <div
           aria-hidden
           className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(52%_44%_at_50%_18%,rgba(232,228,220,0.04)_0%,rgba(232,228,220,0)_75%)]"
         />
 
         {/* Header */}
-        <header className="relative z-10 flex items-center justify-between border-b border-border/15 px-5 py-3">
-          <div className="flex items-center gap-2.5">
-            <MeldLogo size={24} className="shrink-0 rounded-md" />
-            <h1 className="-translate-y-[1px] font-display text-[15px] italic leading-none tracking-tight text-text">
+        <header
+          className="relative z-10 flex h-[44px] items-center justify-between border-b border-white/5 px-4 select-none"
+        >
+          {/* Drag surface — behind interactive content */}
+          <div data-tauri-drag-region className="absolute inset-0" />
+          <div className="relative z-10 flex items-center gap-2">
+            <MeldLogo className="h-4 w-4 text-accent" />
+            <span className="font-display italic text-[14px] font-medium text-text-secondary">
               meld
-            </h1>
-            {state.vaultPath && (
-              <span className="max-w-[220px] truncate text-xs leading-none text-text-muted">
-                {state.vaultName}
-              </span>
-            )}
+            </span>
+            <span className="ml-2 px-2 py-0.5 rounded-lg bg-white/5 font-mono text-[10px] text-text-muted">
+              {state.vaultName || "No Vault"}
+            </span>
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="relative z-10 flex items-center gap-2">
             <button
               onClick={actions.toggleHistory}
-              className={`flex h-8 w-8 items-center justify-center rounded-md border transition-all duration-[120ms] ${
-                state.showHistory
-                  ? "border-transparent bg-bg-tertiary text-text"
-                  : "border-transparent text-text-muted hover:bg-bg-tertiary/70 hover:text-text-secondary"
-              }`}
+              className={`flex h-7 w-7 items-center justify-center rounded-xl transition-colors ${state.showHistory
+                ? "bg-bg-tertiary text-text"
+                : "text-text-muted hover:bg-white/5 hover:text-text"
+                }`}
               title="History"
-              aria-label="History"
             >
-              <History className="h-4 w-4" strokeWidth={1.8} />
+              <History className="h-4 w-4" />
             </button>
             <button
               onClick={actions.toggleSettings}
-              className={`flex h-8 w-8 items-center justify-center rounded-md border transition-all duration-[120ms] ${
-                state.showSettings
-                  ? "border-transparent bg-bg-tertiary text-text"
-                  : "border-transparent text-text-muted hover:bg-bg-tertiary/70 hover:text-text-secondary"
-              }`}
+              className={`flex h-7 w-7 items-center justify-center rounded-xl transition-colors ${state.showSettings
+                ? "bg-bg-tertiary text-text"
+                : "text-text-muted hover:bg-white/5 hover:text-text"
+                }`}
               title="Settings"
-              aria-label="Settings"
             >
-              <Settings className="h-4 w-4" strokeWidth={1.8} />
+              <Settings className="h-4 w-4" />
             </button>
+            {/* Windows / Linux controls on the right */}
+            <div className="ml-2 border-l border-white/5 pl-2 h-full hidden sm:flex items-center">
+              <WindowControls placement="right" />
+            </div>
           </div>
         </header>
 
@@ -164,23 +169,31 @@ export default function Home() {
                   onOpenNote={actions.handleOpenNoteFromChat}
                 />
               </div>
-              {state.activeNote && (
-                <aside className="w-[420px] border-l border-border/20 overflow-y-auto bg-bg-secondary/50">
+              <aside
+                className={`shrink-0 overflow-hidden bg-black/20 transition-[width,border-color] duration-[280ms] ease-out ${
+                  state.activeNote
+                    ? "w-[420px] border-l border-white/5"
+                    : "w-0 border-l border-transparent"
+                }`}
+              >
+                <div
+                  className={`h-full w-[420px] overflow-y-auto transition-opacity duration-200 ${
+                    state.activeNote ? "opacity-100 delay-100" : "opacity-0"
+                  }`}
+                >
                   <NotePreview
                     notePath={state.activeNote}
                     content={state.noteContent}
                     loading={state.loadingNotePreview}
                     canGoBack={state.noteHistoryIndex > 0}
-                    canGoForward={
-                      state.noteHistoryIndex < state.noteHistory.length - 1
-                    }
+                    canGoForward={state.noteHistoryIndex < state.noteHistory.length - 1}
                     onGoBack={actions.goToPreviousNote}
                     onGoForward={actions.goToNextNote}
                     onOpenNote={actions.handleOpenNoteFromChat}
                     onOpenInEditor={actions.handleOpenNoteInEditor}
                   />
-                </aside>
-              )}
+                </div>
+              </aside>
             </>
           )}
         </div>
@@ -197,13 +210,15 @@ export default function Home() {
       </div>
 
       {/* Toast */}
-      {toastMessage && (
-        <div className="animate-fade-in pointer-events-none fixed inset-x-0 top-4 z-50 flex justify-center">
-          <div className="pointer-events-auto rounded-xl border border-warning/25 bg-warning/10 px-4 py-2.5 text-xs text-warning shadow-lg shadow-warning/10 backdrop-blur-md">
-            {toastMessage}
+      {
+        toastMessage && (
+          <div className="animate-fade-in pointer-events-none fixed inset-x-0 top-4 z-50 flex justify-center">
+            <div className="pointer-events-auto rounded-2xl border border-warning/25 bg-warning/10 px-5 py-3 text-xs text-warning shadow-lg shadow-warning/10 backdrop-blur-md">
+              {toastMessage}
+            </div>
           </div>
-        </div>
-      )}
-    </div>
+        )
+      }
+    </div >
   );
 }

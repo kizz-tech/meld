@@ -42,7 +42,7 @@ export default function RunTraceModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden px-4 py-4">
       <button
         aria-label="Close run trace"
-        className="absolute inset-0 animate-overlay-fade bg-black/55"
+        className="absolute inset-0 animate-overlay-fade bg-black/50"
         onClick={onClose}
       />
 
@@ -59,7 +59,7 @@ export default function RunTraceModal({
           <button
             type="button"
             onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-md border border-border/30 text-text-muted transition-colors hover:border-border-hover hover:text-text"
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-border/30 text-text-muted transition-colors hover:border-border-hover hover:text-text"
             title="Close run trace"
             aria-label="Close run trace"
           >

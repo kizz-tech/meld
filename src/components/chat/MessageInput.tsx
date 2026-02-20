@@ -40,7 +40,7 @@ export default function MessageInput({
 
   const submitMessage = useCallback(async (rawText?: string) => {
     const text = (rawText ?? input).trim();
-    if (!text || isStreaming || streamSuppressed) return;
+    if (!text || isStreaming) return;
 
     setInput("");
 
@@ -80,7 +80,7 @@ export default function MessageInput({
       store.clearThinkingLog();
       store.setStreamSuppressed(false);
     }
-  }, [input, isStreaming, streamSuppressed, activeConversationId, onSendMessage]);
+  }, [input, isStreaming, activeConversationId, onSendMessage]);
 
   useEffect(() => {
     if (!quickPrompt) return;
@@ -160,8 +160,8 @@ export default function MessageInput({
   };
 
   return (
-    <div className="border-t border-border/20 bg-bg/60 px-6 py-5">
-      <div className="mx-auto flex max-w-4xl items-end gap-2">
+    <div className="absolute bottom-6 left-0 right-0 px-6 flex justify-center pointer-events-none z-20">
+      <div className="pointer-events-auto flex w-full max-w-3xl items-center gap-2 rounded-[28px] bg-bg border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.6)] ring-1 ring-white/5 p-2">
         <textarea
           ref={textareaRef}
           value={input}
@@ -170,14 +170,14 @@ export default function MessageInput({
           placeholder={
             isIndexing
               ? "Indexing in progress..."
-              : streamSuppressed
+              : streamSuppressed && isStreaming
                 ? "Stopping current generation..."
                 : "Ask about your notes..."
           }
           rows={1}
           style={{ maxHeight: MAX_TEXTAREA_HEIGHT }}
-          className="flex-1 resize-none overflow-y-auto rounded-2xl border border-white/[0.04] bg-white/[0.04] px-4 py-3 text-sm leading-relaxed text-text placeholder:text-text-muted/70 outline-none transition-[background,box-shadow] duration-[120ms] focus-visible:bg-white/[0.06] focus-visible:shadow-[0_0_0_1px_var(--color-border-focus)]"
-          disabled={isIndexing || isStreaming || streamSuppressed}
+          className="flex-1 ml-2 my-1 resize-none overflow-y-auto bg-transparent px-2 py-2 text-[15px] leading-relaxed text-text placeholder:text-text-muted/70 outline-none"
+          disabled={isIndexing || isStreaming}
         />
 
         {isStreaming ? (
@@ -186,10 +186,10 @@ export default function MessageInput({
             onClick={() => {
               void handleStop();
             }}
-            className="flex h-[48px] w-[48px] items-center justify-center rounded-2xl bg-error/12 text-error transition-all duration-[120ms] hover:bg-error/20"
+            className="flex h-[40px] w-[40px] shrink-0 items-center justify-center rounded-full bg-white/10 text-text-secondary shadow-sm transition-all duration-[120ms] hover:scale-105 hover:bg-white/15 hover:text-text active:scale-95"
             title="Stop generation"
           >
-            <span className="h-3.5 w-3.5 rounded-[2px] bg-current" />
+            <span className="h-3 w-3 rounded-[2px] bg-current" />
           </button>
         ) : (
           <button
@@ -197,11 +197,11 @@ export default function MessageInput({
             onClick={() => {
               void submitMessage();
             }}
-            disabled={!input.trim() || isIndexing || streamSuppressed}
-            className="flex h-[48px] w-[48px] items-center justify-center rounded-2xl bg-accent/15 text-accent transition-all duration-[120ms] hover:bg-accent/22 disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={!input.trim() || isIndexing}
+            className="flex h-[40px] w-[40px] shrink-0 items-center justify-center rounded-full bg-accent text-bg shadow-[0_0_16px_var(--shadow-accent-glow)] transition-all duration-[120ms] hover:scale-105 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:scale-100 disabled:shadow-none"
             title="Send message"
           >
-            <SendHorizonal className="h-5 w-5" />
+            <SendHorizonal className="h-4 w-4 relative -ml-[1px]" strokeWidth={2.5} />
           </button>
         )}
       </div>

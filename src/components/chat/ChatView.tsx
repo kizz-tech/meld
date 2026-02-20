@@ -112,24 +112,27 @@ function ChatView({
   };
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="relative flex h-full flex-col">
       <div
         ref={scrollContainerRef}
         onScroll={handleScroll}
-        className="flex-1 space-y-5 overflow-y-auto overscroll-contain px-6 py-5"
+        className="flex-1 space-y-5 overflow-y-auto overscroll-contain px-6 pt-5 pb-32"
       >
         {messages.length === 0 && !isStreaming && (
           <div className="flex h-full flex-col items-center justify-center text-text-muted">
-            <div className="mx-auto w-full max-w-[560px] rounded-3xl px-8 py-10 text-center">
-              <span className="mx-auto mb-5 inline-flex h-2 w-2 rounded-full bg-accent shadow-[0_0_8px_1px_rgba(201,168,76,0.12)]" />
-              <p className="text-[32px] font-semibold tracking-tight text-text">
+            <div className="relative mx-auto w-full max-w-[560px] rounded-[32px] px-8 py-12 text-center">
+              <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_center,var(--color-accent)_0,transparent_50%)] opacity-5 blur-3xl" />
+              <div className="mx-auto mb-6 flex h-14 w-14 items-center justify-center rounded-[20px] bg-accent/10 border border-accent/20 shadow-[0_0_32px_rgba(232,202,114,0.15)]">
+                <span className="h-3 w-3 rounded-full bg-accent shadow-[0_0_16px_rgba(232,202,114,0.8)]" />
+              </div>
+              <p className="text-[36px] font-display italic tracking-tight text-text drop-shadow-[0_2px_16px_rgba(255,255,255,0.08)]">
                 Ask anything about your vault
               </p>
-              <p className="mt-1 text-sm text-text-muted/80">
+              <p className="mt-2 text-[15px] text-text-secondary/80">
                 Your knowledge, your context, your AI.
               </p>
 
-              <div className="mt-8 grid gap-2.5">
+              <div className="mt-10 grid gap-3.5">
                 {QUICK_PROMPTS.map((prompt) => (
                   <button
                     key={prompt}
@@ -140,7 +143,7 @@ function ChatView({
                         text: prompt,
                       })
                     }
-                    className="w-full rounded-xl border border-white/[0.04] bg-white/[0.03] px-4 py-3 text-left text-sm text-text-secondary transition-all duration-[180ms] hover:border-white/[0.08] hover:bg-white/[0.05] hover:text-text"
+                    className="w-full rounded-[24px] border border-white/5 bg-white/[0.02] px-6 py-4.5 text-left text-[14px] text-text-secondary transition-all duration-[240ms] hover:border-white/10 hover:bg-white/[0.06] hover:text-text hover:shadow-[0_8px_24px_rgba(0,0,0,0.2)]"
                   >
                     {prompt}
                   </button>

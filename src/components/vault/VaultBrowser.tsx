@@ -575,7 +575,7 @@ export default function VaultBrowser({
             type="button"
             role="menuitem"
             onClick={() => requestCreateNote(null)}
-            className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
+            className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
           >
             <span>New note</span>
             <span>＋</span>
@@ -584,7 +584,7 @@ export default function VaultBrowser({
             type="button"
             role="menuitem"
             onClick={() => requestCreateFolder(null)}
-            className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
+            className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
           >
             <span>New folder</span>
             <span>＋</span>
@@ -598,7 +598,7 @@ export default function VaultBrowser({
             type="button"
             role="menuitem"
             onClick={() => requestCreateNote(target.path)}
-            className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
+            className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
           >
             <span>New note</span>
             <span>＋</span>
@@ -607,7 +607,7 @@ export default function VaultBrowser({
             type="button"
             role="menuitem"
             onClick={() => requestCreateFolder(target.path)}
-            className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
+            className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
           >
             <span>New folder</span>
             <span>＋</span>
@@ -616,7 +616,7 @@ export default function VaultBrowser({
             type="button"
             role="menuitem"
             onClick={() => requestRename(target.path as string)}
-            className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
+            className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
           >
             <span>Rename</span>
             <span>✎</span>
@@ -625,7 +625,7 @@ export default function VaultBrowser({
             type="button"
             role="menuitem"
             onClick={() => togglePin(target.path as string)}
-            className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
+            className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
           >
             <span>
               {pinnedPaths.has(normalizeRelativePath(target.path as string))
@@ -638,7 +638,7 @@ export default function VaultBrowser({
             type="button"
             role="menuitem"
             onClick={() => requestDelete(target.path as string, "folder")}
-            className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs text-error transition-colors hover:bg-error/10"
+            className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs text-error transition-colors hover:bg-error/10"
           >
             <span>Archive</span>
             <span>↧</span>
@@ -655,7 +655,7 @@ export default function VaultBrowser({
               setContextMenu(null);
               onSelectNote(target.path as string);
             }}
-            className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
+            className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
           >
             <span>Open</span>
             <span>↩</span>
@@ -664,7 +664,7 @@ export default function VaultBrowser({
             type="button"
             role="menuitem"
             onClick={() => requestRename(target.path as string)}
-            className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
+            className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
           >
             <span>Rename</span>
             <span>✎</span>
@@ -673,7 +673,7 @@ export default function VaultBrowser({
             type="button"
             role="menuitem"
             onClick={() => togglePin(target.path as string)}
-            className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
+            className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
           >
             <span>
               {pinnedPaths.has(normalizeRelativePath(target.path as string))
@@ -686,7 +686,7 @@ export default function VaultBrowser({
             type="button"
             role="menuitem"
             onClick={() => requestDelete(target.path as string, "file")}
-            className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs text-error transition-colors hover:bg-error/10"
+            className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs text-error transition-colors hover:bg-error/10"
           >
             <span>Archive</span>
             <span>↧</span>
@@ -891,7 +891,7 @@ export default function VaultBrowser({
           <div
             data-vault-context-menu
             role="menu"
-            className="animate-fade-in fixed z-[220] min-w-[192px] rounded-lg border border-border/70 bg-bg-secondary/95 p-1.5 shadow-lg shadow-black/25 backdrop-blur-md"
+            className="animate-fade-in fixed z-[220] min-w-[192px] rounded-2xl border border-border/70 bg-bg-secondary/95 p-2 shadow-lg shadow-black/25 backdrop-blur-md"
             style={{
               left: `${contextMenu.x}px`,
               top: `${contextMenu.y}px`,

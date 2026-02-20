@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useAppStore } from "@/lib/store";
 import { open } from "@tauri-apps/plugin-dialog";
 import { selectVault, setApiKey, reindex } from "@/lib/tauri";
+import { Check } from "lucide-react";
 import Select from "@/components/ui/Select";
 import MeldLogo from "@/components/ui/MeldLogo";
 import { setupEventListeners } from "@/lib/events";
@@ -54,8 +55,10 @@ export default function OnboardingFlow() {
   }
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-bg">
-      <div className="w-full max-w-md p-8 space-y-8">
+    <div className="relative flex items-center justify-center h-full w-full bg-transparent">
+      {/* Drag surface — behind interactive content */}
+      <div data-tauri-drag-region className="absolute inset-0" />
+      <div className="relative z-10 w-full max-w-md p-8 space-y-8">
         {step === "welcome" && (
           <div className="space-y-6 text-center">
             <MeldLogo size={64} className="mx-auto rounded-2xl" />
@@ -66,7 +69,7 @@ export default function OnboardingFlow() {
             </p>
             <button
               onClick={() => setStep("folder")}
-              className="w-full py-3 px-6 bg-accent text-bg font-medium rounded-xl hover:opacity-90 transition-opacity"
+              className="w-full py-3 px-6 bg-accent text-bg font-medium rounded-2xl hover:opacity-90 transition-opacity"
             >
               Get Started
             </button>
@@ -93,7 +96,7 @@ export default function OnboardingFlow() {
                   const selected = await open({ directory: true, multiple: false });
                   if (selected) setFolderPath(selected);
                 }}
-                className="px-4 py-3 bg-bg-secondary rounded-xl text-text-muted hover:text-text transition-colors whitespace-nowrap"
+                className="px-4 py-3 bg-bg-secondary border border-white/[0.06] rounded-xl text-text-muted hover:text-text hover:border-white/10 transition-colors whitespace-nowrap"
               >
                 Browse
               </button>
@@ -102,7 +105,7 @@ export default function OnboardingFlow() {
             <button
               onClick={handleSelectFolder}
               disabled={!folderPath.trim()}
-              className="w-full py-3 px-6 bg-accent text-bg font-medium rounded-xl hover:opacity-90 transition-opacity disabled:opacity-50"
+              className="w-full py-3 px-6 bg-accent text-bg font-medium rounded-2xl hover:opacity-90 transition-opacity disabled:opacity-50"
             >
               Continue
             </button>
@@ -135,7 +138,7 @@ export default function OnboardingFlow() {
             <button
               onClick={handleSetApiKey}
               disabled={!apiKey.trim()}
-              className="w-full py-3 px-6 bg-accent text-bg font-medium rounded-xl hover:opacity-90 transition-opacity disabled:opacity-50"
+              className="w-full py-3 px-6 bg-accent text-bg font-medium rounded-2xl hover:opacity-90 transition-opacity disabled:opacity-50"
             >
               Start Indexing
             </button>
@@ -147,9 +150,9 @@ export default function OnboardingFlow() {
             <h2 className="text-xl font-semibold">Indexing Your Notes</h2>
             {store.indexProgress ? (
               <>
-                <div className="w-full bg-bg-tertiary rounded-full h-1.5">
+                <div className="w-full bg-bg-tertiary rounded-full h-2">
                   <div
-                    className="bg-text-secondary h-1.5 rounded-full transition-all duration-300"
+                    className="bg-accent h-2 rounded-full transition-all duration-300"
                     style={{
                       width: `${(store.indexProgress.current / store.indexProgress.total) * 100}%`,
                     }}
@@ -172,14 +175,16 @@ export default function OnboardingFlow() {
 
         {step === "ready" && (
           <div className="space-y-6 text-center">
-            <div className="text-4xl">✓</div>
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-[20px] bg-success/10 border border-success/20">
+              <Check className="h-6 w-6 text-success" strokeWidth={2.5} />
+            </div>
             <h2 className="text-xl font-semibold">Ready</h2>
             <p className="text-text-secondary">
               {store.fileCount} notes indexed. Start chatting with your knowledge base.
             </p>
             <button
               onClick={handleFinish}
-              className="w-full py-3 px-6 bg-accent text-bg font-medium rounded-xl hover:opacity-90 transition-opacity"
+              className="w-full py-3 px-6 bg-accent text-bg font-medium rounded-2xl hover:opacity-90 transition-opacity"
             >
               Open meld
             </button>

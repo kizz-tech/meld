@@ -1,29 +1,35 @@
 @import "tailwindcss";
 
 @theme {
-  --color-bg: #0A0A09;
-  --color-bg-secondary: #131210;
-  --color-bg-tertiary: #1A1816;
-  --color-border: #242118;
-  --color-border-hover: #322E24;
-  --color-border-focus: #3D382E;
-  --color-text: #E8E4DC;
-  --color-text-secondary: #8A847A;
-  --color-text-muted: #5A5650;
-  --color-accent: #C9A84C;
-  --color-accent-dim: #9A7D3A;
-  --color-success: #4ade80;
-  --color-error: #f87171;
-  --color-warning: #fbbf24;
-  --shadow-accent-glow: color-mix(in srgb, var(--color-accent) 20%, transparent);
-  --shadow-surface-glow: color-mix(in srgb, var(--color-text) 10%, transparent);
+  --color-bg: #0A0A0A;
+  --color-bg-secondary: rgba(15, 15, 15, 0.7);
+  --color-bg-tertiary: rgba(25, 25, 25, 0.6);
+  --color-border: rgba(255, 255, 255, 0.1);
+  --color-border-hover: rgba(255, 255, 255, 0.2);
+  --color-border-focus: rgba(255, 255, 255, 0.35);
+  --color-text: #F2F0E9;
+  --color-text-secondary: #A09A8F;
+  --color-text-muted: #666157;
+  --color-accent: #E8CA72;
+  --color-accent-dim: #C4A54B;
+  --color-success: #7CC994;
+  --color-error: #D4736C;
+  --color-warning: #E5AE3A;
+  --shadow-accent-glow: color-mix(in srgb, var(--color-accent) 40%, transparent);
+  --shadow-surface-glow: color-mix(in srgb, var(--color-text) 20%, transparent);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   --font-display: var(--font-instrument-serif);
 }
 
+html {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+
 body {
-  background: var(--color-bg);
+  background-color: transparent !important;
+  background-image: none !important;
   color: var(--color-text);
   font-family: var(--font-sans, ui-sans-serif, system-ui, sans-serif);
 }
@@ -90,6 +96,7 @@ body::before {
     opacity: 0;
     transform: translateY(6px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -106,6 +113,7 @@ body::before {
     opacity: 0;
     transform: translateY(8px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -172,6 +180,7 @@ body::before {
   from {
     opacity: 0;
   }
+
   to {
     opacity: 1;
   }
@@ -182,6 +191,7 @@ body::before {
     opacity: 0;
     transform: translateY(8px) scale(0.985);
   }
+
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
@@ -195,3 +205,4 @@ body::before {
 .animate-dialog-in {
   animation: dialog-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
+

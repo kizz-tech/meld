@@ -63,7 +63,7 @@ function IconButton({ title, onClick, children }: IconButtonProps) {
       title={title}
       aria-label={title}
       onClick={onClick}
-      className="flex h-7 w-7 items-center justify-center rounded-md text-text-muted/80 transition-colors duration-[120ms] hover:text-text outline-none"
+      className="flex h-7 w-7 items-center justify-center rounded-lg text-text-muted/80 transition-colors duration-[120ms] hover:text-text outline-none"
     >
       {children}
     </button>
@@ -823,7 +823,7 @@ function MessageBubble({
           </IconButton>
 
           {showTechMenu && (
-            <div className="absolute right-0 top-[calc(100%+8px)] z-40 min-w-[170px] rounded-lg border border-border/70 bg-bg-secondary/95 p-1.5 shadow-xl shadow-black/45">
+            <div className="absolute right-0 top-[calc(100%+8px)] z-40 min-w-[170px] rounded-2xl border border-border/70 bg-bg-secondary/95 p-2 shadow-xl shadow-black/45">
               {canOpenRunTrace && message.runId && (
                 <button
                   type="button"
@@ -831,7 +831,7 @@ function MessageBubble({
                     setShowTechMenu(false);
                     void onOpenRunTrace?.(message.runId as string);
                   }}
-                  className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
+                  className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text"
                 >
                   <span>Run trace</span>
                   <span>↗</span>
@@ -841,7 +841,7 @@ function MessageBubble({
                 <button
                   type="button"
                   onClick={() => setPendingDelete(true)}
-                  className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs text-error transition-colors hover:bg-error/10"
+                  className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs text-error transition-colors hover:bg-error/10"
                 >
                   <span>Delete</span>
                   <span>⌫</span>
@@ -882,7 +882,7 @@ function MessageBubble({
                 rows={1}
                 style={{ maxHeight: 400 }}
                 disabled={savingEdit}
-                className="w-full resize-none overflow-y-auto rounded-2xl border border-white/[0.08] bg-white/[0.05] px-4 py-3 text-sm leading-relaxed text-text outline-none transition-colors focus-visible:border-border-focus focus-visible:shadow-[0_0_0_1px_var(--color-border-focus)]"
+                className="w-full resize-none overflow-y-auto rounded-[20px] border border-white/[0.08] bg-white/5 px-5 py-3.5 text-sm leading-relaxed text-text outline-none transition-colors focus-visible:border-border-focus focus-visible:shadow-[0_0_0_1px_var(--color-border-focus)]"
               />
               <div className="mt-2 flex items-center justify-end gap-1.5">
                 <button
@@ -909,7 +909,7 @@ function MessageBubble({
               </div>
             </div>
           ) : isUser ? (
-            <div className="max-w-[85%] rounded-2xl border border-white/[0.06] bg-white/[0.05] px-4 py-3">
+            <div className="max-w-[85%] rounded-[20px] border border-white/[0.06] bg-white/5 px-5 py-3.5">
               <div
                 className={`whitespace-pre-wrap text-sm leading-relaxed text-text ${
                   isLongUserMessage && collapsed ? "line-clamp-6" : ""

@@ -20,13 +20,12 @@ export default function StatusBar({
   onReindex,
 }: StatusBarProps) {
   const indexLabel = isIndexing
-    ? `Indexing... ${
-        indexProgress ? `${indexProgress.current}/${indexProgress.total}` : ""
+    ? `Indexing... ${indexProgress ? `${indexProgress.current}/${indexProgress.total}` : ""
       }`.trim()
     : `Indexed · ${fileCount} notes`;
 
   return (
-    <footer className="flex h-8 items-center gap-2.5 bg-bg-secondary/25 px-3 font-mono text-[10px] text-text-muted/60">
+    <footer className="flex h-9 items-center gap-3 border-t border-white/5 bg-black/20 px-4 pb-0.5 font-mono text-[10px] text-text-muted/60">
       <span
         className="min-w-0 flex-1 truncate"
         title={vaultPath ?? "No vault selected"}

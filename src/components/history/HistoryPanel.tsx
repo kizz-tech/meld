@@ -56,7 +56,7 @@ export default function HistoryPanel() {
       </div>
 
       {error && (
-        <div className="rounded-md border border-error/40 bg-error/[0.08] px-3 py-2 text-sm text-error">
+        <div className="rounded-xl border border-error/40 bg-error/[0.08] px-3.5 py-2.5 text-sm text-error">
           {error}
         </div>
       )}
@@ -75,7 +75,7 @@ export default function HistoryPanel() {
           {entries.map((entry) => (
             <div
               key={entry.id}
-              className="p-4 bg-bg-secondary/40 rounded-xl space-y-2"
+              className="p-4 bg-bg-secondary/40 border border-white/[0.04] rounded-xl space-y-2.5"
             >
               <p className="text-sm">{entry.message}</p>
               <div className="flex items-center justify-between">
@@ -84,17 +84,17 @@ export default function HistoryPanel() {
                 </span>
                 <button
                   onClick={() => handleRevert(entry.id)}
-                  className="text-xs px-2 py-1 text-error hover:bg-error/10 rounded transition-colors"
+                  className="text-xs px-2.5 py-1 text-error hover:bg-error/10 rounded-lg transition-colors"
                 >
                   Revert
                 </button>
               </div>
               {entry.files_changed.length > 0 && (
-                <div className="flex flex-wrap gap-1">
+                <div className="flex flex-wrap gap-1.5">
                   {entry.files_changed.map((file) => (
                     <span
                       key={file}
-                      className="text-xs px-1.5 py-0.5 bg-bg-tertiary rounded text-text-muted"
+                      className="text-[11px] px-2 py-0.5 bg-bg-tertiary rounded-lg text-text-muted"
                     >
                       {file}
                     </span>

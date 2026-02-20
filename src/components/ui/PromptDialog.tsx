@@ -61,11 +61,11 @@ export default function PromptDialog({
     <div className="fixed inset-0 z-[160] flex items-center justify-center px-4">
       <button
         aria-label="Close prompt dialog"
-        className="absolute inset-0 animate-overlay-fade bg-black/60"
+        className="absolute inset-0 animate-overlay-fade bg-black/50"
         onClick={onCancel}
       />
 
-      <div className="relative w-full max-w-md space-y-4 rounded-2xl border border-border/60 bg-bg-secondary/95 p-5 shadow-2xl shadow-black/50 backdrop-blur-lg animate-dialog-in">
+      <div className="relative w-full max-w-md space-y-4 rounded-2xl border border-white/[0.06] bg-bg-secondary/95 p-6 shadow-2xl shadow-black/50 backdrop-blur-lg animate-dialog-in">
         <h3 className="text-lg font-semibold">{title}</h3>
         {description && (
           <p className="whitespace-pre-line text-sm text-text-secondary">{description}</p>
@@ -82,19 +82,19 @@ export default function PromptDialog({
             }
           }}
           placeholder={placeholder}
-          className="w-full rounded-lg border border-border/60 bg-bg/70 px-3 py-2 text-sm text-text outline-none transition-colors focus-visible:border-border-focus focus-visible:shadow-[0_0_0_1px_var(--color-border-focus)]"
+          className="w-full rounded-xl border border-border/60 bg-bg/70 px-3 py-2.5 text-sm text-text outline-none transition-colors focus-visible:border-border-focus focus-visible:shadow-[0_0_0_1px_var(--color-border-focus)]"
         />
 
-        <div className="flex justify-end gap-2 pt-1">
+        <div className="flex justify-end gap-2.5 pt-2">
           <button
             onClick={onCancel}
-            className="rounded-md bg-bg-tertiary px-3 py-1.5 text-sm text-text-secondary transition-colors hover:bg-border hover:text-text"
+            className="rounded-xl border border-white/[0.06] bg-bg-tertiary/60 px-4 py-2 text-sm text-text-secondary transition-colors hover:bg-bg-tertiary hover:text-text"
           >
             {cancelLabel}
           </button>
           <button
             onClick={() => onConfirm(value)}
-            className="rounded-md bg-accent px-3 py-1.5 text-sm text-bg transition-opacity hover:opacity-90"
+            className="rounded-xl bg-accent px-4 py-2 text-sm text-bg transition-opacity hover:opacity-90"
           >
             {confirmLabel}
           </button>
