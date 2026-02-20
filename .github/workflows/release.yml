@@ -92,29 +92,39 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseDraft: true
           prerelease: false
+          updaterJsonKeepUniversal: true
           args: ${{ matrix.args }}
 
-  # Upload stable-name copies so /releases/latest/download/ links never break
-  stable-names:
+  # Rename to stable names, generate latest.json, clean up duplicates, publish
+  finalize:
     needs: build
     runs-on: ubuntu-22.04
     steps:
-      - name: Download release assets and re-upload with stable names
+      - name: Finalize release assets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
           REPO="kizz-tech/meld"
+          BASE_URL="https://github.com/${REPO}/releases/download/${TAG}"
           mkdir -p assets
 
           # Download all assets from the draft release
           gh release download "$TAG" --repo "$REPO" --dir assets
 
-          # Map versioned filenames to stable names
+          echo "=== Downloaded assets ==="
+          ls -la assets/
+
+          # --- Rename versioned files to stable names ---
+          declare -A RENAME_MAP
           for f in assets/*; do
             base=$(basename "$f")
             stable=""
@@ -128,9 +138,85 @@ jobs:
               meld_*_amd64.deb)           stable="meld-linux-amd64.deb" ;;
               meld_*_amd64.AppImage)      stable="meld-linux-amd64.AppImage" ;;
               meld-*-1.x86_64.rpm)        stable="meld-linux-x86_64.rpm" ;;
+              # Signature files
+              meld_aarch64.app.tar.gz.sig)  stable="meld-macos-arm64.app.tar.gz.sig" ;;
+              meld_x64.app.tar.gz.sig)      stable="meld-macos-x64.app.tar.gz.sig" ;;
+              meld_*_amd64.AppImage.sig)    stable="meld-linux-amd64.AppImage.sig" ;;
+              meld_*_x64-setup.exe.sig)     stable="meld-windows-x64-setup.exe.sig" ;;
+              meld_*_x64_en-US.msi.sig)     stable="meld-windows-x64.msi.sig" ;;
             esac
             if [ -n "$stable" ]; then
-              cp "$f" "assets/$stable"
-              gh release upload "$TAG" "assets/$stable" --repo "$REPO" --clobber
+              RENAME_MAP["$base"]="$stable"
+              mv "$f" "assets/$stable"
             fi
           done
+
+          echo "=== After rename ==="
+          ls -la assets/
+
+          # --- Delete versioned originals from the release ---
+          for original in "${!RENAME_MAP[@]}"; do
+            echo "Deleting original: $original"
+            gh release delete-asset "$TAG" "$original" --repo "$REPO" --yes 2>/dev/null || true
+          done
+
+          # Also delete the tauri-generated latest.json (we'll generate our own)
+          gh release delete-asset "$TAG" "latest.json" --repo "$REPO" --yes 2>/dev/null || true
+
+          # --- Generate latest.json for Tauri updater ---
+          read_sig() {
+            local sig_file="assets/$1"
+            if [ -f "$sig_file" ]; then
+              cat "$sig_file"
+            else
+              echo ""
+            fi
+          }
+
+          PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          MAC_ARM_SIG=$(read_sig "meld-macos-arm64.app.tar.gz.sig")
+          MAC_X64_SIG=$(read_sig "meld-macos-x64.app.tar.gz.sig")
+          LINUX_SIG=$(read_sig "meld-linux-amd64.AppImage.sig")
+          WIN_SIG=$(read_sig "meld-windows-x64-setup.exe.sig")
+
+          # Build latest.json with jq
+          LATEST=$(jq -n \
+            --arg version "$VERSION" \
+            --arg pub_date "$PUB_DATE" \
+            --arg mac_arm_url "${BASE_URL}/meld-macos-arm64.app.tar.gz" \
+            --arg mac_arm_sig "$MAC_ARM_SIG" \
+            --arg mac_x64_url "${BASE_URL}/meld-macos-x64.app.tar.gz" \
+            --arg mac_x64_sig "$MAC_X64_SIG" \
+            --arg linux_url "${BASE_URL}/meld-linux-amd64.AppImage" \
+            --arg linux_sig "$LINUX_SIG" \
+            --arg win_url "${BASE_URL}/meld-windows-x64-setup.exe" \
+            --arg win_sig "$WIN_SIG" \
+            '{
+              version: $version,
+              notes: "",
+              pub_date: $pub_date,
+              platforms: {
+                "darwin-aarch64": { url: $mac_arm_url, signature: $mac_arm_sig },
+                "darwin-x86_64": { url: $mac_x64_url, signature: $mac_x64_sig },
+                "linux-x86_64": { url: $linux_url, signature: $linux_sig },
+                "windows-x86_64": { url: $win_url, signature: $win_sig }
+              }
+            }')
+
+          echo "$LATEST" > assets/latest.json
+          echo "=== latest.json ==="
+          cat assets/latest.json
+
+          # --- Upload stable-named files + latest.json ---
+          for f in assets/*; do
+            base=$(basename "$f")
+            # Skip any remaining versioned files we didn't map
+            echo "Uploading: $base"
+            gh release upload "$TAG" "$f" --repo "$REPO" --clobber
+          done
+
+          # --- Publish the release ---
+          gh release edit "$TAG" --repo "$REPO" --draft=false
+
+          echo "=== Release published ==="
