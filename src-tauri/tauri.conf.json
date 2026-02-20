@@ -31,7 +31,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEUzMEI1NjIyNjk2NzM3MDMKUldRRE4yZHBJbFlMNDlJSnlleU9QVnJNOTZFbzlFQUhCZCtQVEY1ejJad0gzRzNZQmp1NVRpaVgK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENBMzY4OTcwQjlGOEE5MzcKUldRM3FmaTVjSWsyeWlEc2FUY2xscVF2RG9paWpVem1EQURJZk9ZMzRqc0R3R043TmIyUTZrM0IK",
       "endpoints": [
         "https://github.com/kizz-tech/meld/releases/latest/download/latest.json"
       ]
